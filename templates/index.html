@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Diplomacy Simulation Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #f4f4f9;
+            --text-color: #333;
+            --card-bg: #fff;
+            --border-color: #ddd;
+            --primary-color: #2c3e50;
+            --accent-color: #3498db;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0;
+            color: var(--primary-color);
+        }
+
+        select {
+            padding: 8px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+        }
+
+        .turn-nav {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        button {
+            padding: 8px 16px;
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:disabled {
+            background-color: var(--border-color);
+            cursor: not-allowed;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 20px;
+        }
+
+        .card h2 {
+            margin-top: 0;
+            font-size: 18px;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 15px;
+        }
+
+        th,
+        td {
+            text-align: left;
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background-color: #f8f9fa;
+        }
+
+        .events-list {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        .events-list li {
+            padding: 8px 0;
+            border-bottom: 1px dashed var(--border-color);
+            line-height: 1.4;
+        }
+
+        .agent-thought {
+            background-color: #f8f9fa;
+            border-left: 4px solid var(--accent-color);
+            padding: 10px 15px;
+            margin-bottom: 15px;
+            font-style: italic;
+        }
+
+        .collapsible {
+            cursor: pointer;
+            user-select: none;
+            color: var(--accent-color);
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .content {
+            display: none;
+            margin-bottom: 15px;
+        }
+
+        .active {
+            display: block;
+        }
+
+        /* --- Chat UI Styles --- */
+        .chat-container {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+            margin-top: 10px;
+        }
+
+        .chat-messages {
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            background: #fafafa;
+        }
+
+        .chat-message {
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .chat-message.ai {
+            align-self: flex-start;
+            background-color: #f1f0f0;
+            color: var(--text-color);
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-message.user {
+            align-self: flex-end;
+            background-color: var(--accent-color);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-input-area {
+            display: flex;
+            border-top: 1px solid var(--border-color);
+            padding: 10px;
+            background: #fff;
+        }
+
+        .chat-input-area input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            outline: none;
+            font-size: 14px;
+        }
+
+        .chat-input-area input:focus {
+            border-color: var(--accent-color);
+        }
+
+        .chat-input-area button {
+            margin-left: 10px;
+            border-radius: 20px;
+            padding: 8px 20px;
+        }
+
+        .loading-indicator {
+            align-self: flex-start;
+            color: #888;
+            font-style: italic;
+            font-size: 0.9em;
+            margin-top: -5px;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>🌍 AI Diplomacy Viewer</h1>
+            <div>
+                <label for="sim-select">Simulation: </label>
+                <select id="sim-select">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+        </header>
+
+        <div id="content-area" style="display: none;">
+            <!-- 全体サマリーセクション -->
+            <div id="summary-section" class="card" style="margin-bottom: 20px;">
+                <h2>📊 シミュレーション全体のサマリー</h2>
+
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 300px;">
+                        <canvas id="economyChart"></canvas>
+                    </div>
+                    <div style="flex: 1; min-width: 300px;">
+                        <canvas id="militaryChart"></canvas>
+                    </div>
+                    <div style="flex: 1; min-width: 300px;">
+                        <canvas id="approvalChart"></canvas>
+                    </div>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <h3>🤖 シミュレーション AI チャット</h3>
+                    <div class="chat-container">
+                        <div class="chat-messages" id="chat-history">
+                            <div class="chat-message ai markdown-body" id="ai-summary">
+                                （要約データを読み込み中... まだ生成されていないか、エラーです）
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <input type="text" id="chat-input" placeholder="シミュレーションについての質問を入力してください...">
+                            <button id="chat-send">送信</button>
+                        </div>
+                        <div class="loading-indicator" id="chat-loading" style="margin: 10px 15px;">🤖 AIが思考中...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- これより下は既存の詳細セクション -->
+            <div class="turn-nav">
+                <button id="btn-prev">◀ 前ターン</button>
+                <span id="turn-display">
+                    Turn: <input type="number" id="input-turn" min="1" max="1" value="1"
+                        style="width: 60px; text-align: center; font-size: 16px; border-radius: 4px; border: 1px solid #ccc; padding: 2px;">
+                    / <span id="max-turn">1</span>
+                    <button id="btn-jump" style="margin-left: 5px; padding: 4px 10px; font-size: 14px;">移動</button>
+                    (経過: <span id="current-year">2025</span>年 Q<span id="current-q">1</span>)
+                </span>
+                <button id="btn-next">次ターン ▶</button>
+            </div>
+
+            <div class="grid">
+                <div class="main-panel">
+                    <div class="card">
+                        <h2>🏛️ 国家ステータス</h2>
+                        <table id="countries-table">
+                            <thead>
+                                <tr>
+                                    <th>国</th>
+                                    <th>体制</th>
+                                    <th>経済力</th>
+                                    <th>軍事力</th>
+                                    <th>支持率</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <div class="card" id="agent-actions-container">
+                        <h2>🧠 エージェントの思考と決定</h2>
+                        <div id="agent-actions"></div>
+                    </div>
+
+                    <div class="card" id="sns-logs-container">
+                        <h2>📱 各国のSNS世論 (最大5件)</h2>
+                        <div id="sns-logs"></div>
+                    </div>
+
+                    <div class="card" id="summit-logs-container">
+                        <h2>🤝 首脳会談議事録</h2>
+                        <div id="summit-logs"></div>
+                    </div>
+                </div>
+
+                <div class="side-panel">
+                    <div class="card">
+                        <h2>📰 ワールドニュース (前ターンの出来事)</h2>
+                        <ul class="events-list" id="global-events"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="loading-msg">シミュレーションデータを選択してください...</div>
+    </div>
+
+    <script>
+        let simulationData = [];
+        let currentTurnIndex = 0;
+        let economyChart = null;
+        let militaryChart = null;
+        let approvalChart = null;
+        let currentSimulationFile = null;
+
+        // 初期化
+        async function fetchSimulations() {
+            const res = await fetch('/api/simulations');
+            const files = await res.json();
+            const select = document.getElementById('sim-select');
+            select.innerHTML = '<option value="">-- 選択 --</option>';
+            files.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f;
+                opt.textContent = f;
+                select.appendChild(opt);
+            });
+
+            select.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    loadSimulation(e.target.value);
+                } else {
+                    document.getElementById('content-area').style.display = 'none';
+                    document.getElementById('loading-msg').style.display = 'block';
+                }
+            });
+        }
+
+        async function loadSimulation(filename) {
+            document.getElementById('loading-msg').textContent = '読み込み中...';
+            document.getElementById('content-area').style.display = 'none';
+            document.getElementById('summary-section').style.display = 'none'; // Summary hide temporarily
+            document.getElementById('loading-msg').style.display = 'block';
+
+            const res = await fetch(`/api/simulations/${filename}`);
+            simulationData = await res.json();
+
+            currentSimulationFile = filename;
+            fetchSimulationSummary(filename);
+
+            if (simulationData.length > 0) {
+                document.getElementById('content-area').style.display = 'block';
+                document.getElementById('summary-section').style.display = 'block';
+                document.getElementById('loading-msg').style.display = 'none';
+                currentTurnIndex = 0;
+                renderTurn();
+                renderCharts();
+            } else {
+                document.getElementById('loading-msg').textContent = 'データがありません。';
+            }
+        }
+
+        async function fetchSimulationSummary(filename) {
+            const summaryDiv = document.getElementById('ai-summary');
+            const historyDiv = document.getElementById('chat-history');
+
+            // clear chat history except the first summary box
+            historyDiv.innerHTML = '';
+            historyDiv.appendChild(summaryDiv);
+
+            summaryDiv.textContent = '要約データを読み込み中...';
+            try {
+                const res = await fetch(`/api/simulations/${filename}/summary`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.summary) {
+                        summaryDiv.innerHTML = marked.parse(data.summary);
+                    } else {
+                        summaryDiv.textContent = 'AI要約はまだ生成されていないか、内容が空です。';
+                    }
+                } else {
+                    summaryDiv.textContent = 'AI要約はまだ生成されていません。（シミュレーション完了後に自動生成されます。古いログは手動で生成してください）';
+                }
+            } catch (e) {
+                summaryDiv.textContent = '要約の取得に失敗しました。';
+            }
+        }
+
+        function renderCharts() {
+            if (!simulationData || simulationData.length === 0) return;
+            const labels = simulationData.map(d => `T${d.turn}`);
+            const countries = Object.keys(simulationData[0].world_state.countries);
+            const datasets = { economy: [], military: [], approval: [] };
+            const colors = ['#2c3e50', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6'];
+
+            countries.forEach((country, index) => {
+                const color = colors[index % colors.length];
+                const ecoData = simulationData.map(d => d.world_state.countries[country].economy);
+                const milData = simulationData.map(d => d.world_state.countries[country].military);
+                const appData = simulationData.map(d => d.world_state.countries[country].approval_rating);
+
+                datasets.economy.push({ label: country, data: ecoData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
+                datasets.military.push({ label: country, data: milData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
+                datasets.approval.push({ label: country, data: appData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
+            });
+
+            const drawChart = (canvasId, title, data, existingChart) => {
+                const ctx = document.getElementById(canvasId).getContext('2d');
+                if (existingChart) existingChart.destroy();
+                return new Chart(ctx, {
+                    type: 'line',
+                    data: { labels: labels, datasets: data },
+                    options: { responsive: true, plugins: { title: { display: true, text: title, font: { size: 16 } } } }
+                });
+            };
+
+            economyChart = drawChart('economyChart', '📈 経済力推移', datasets.economy, economyChart);
+            militaryChart = drawChart('militaryChart', '⚔️ 軍事力推移', datasets.military, militaryChart);
+            approvalChart = drawChart('approvalChart', '👍 支持率推移 (%)', datasets.approval, approvalChart);
+        }
+
+        async function sendChatMessage() {
+            const inputEl = document.getElementById('chat-input');
+            const query = inputEl.value.trim();
+            if (!query || !currentSimulationFile) return;
+
+            inputEl.value = '';
+
+            const history = document.getElementById('chat-history');
+
+            // User message
+            const userMsg = document.createElement('div');
+            userMsg.className = 'chat-message user';
+            userMsg.textContent = query;
+            history.appendChild(userMsg);
+
+            // Scroll to bottom
+            history.scrollTop = history.scrollHeight;
+
+            document.getElementById('chat-loading').style.display = 'block';
+            document.getElementById('chat-send').disabled = true;
+
+            try {
+                const res = await fetch(`/api/simulations/${currentSimulationFile}/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query: query })
+                });
+
+                const aiMsg = document.createElement('div');
+                aiMsg.className = 'chat-message ai markdown-body';
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.reply) {
+                        aiMsg.innerHTML = marked.parse(data.reply);
+                    } else {
+                        aiMsg.textContent = "回答がありませんでした。";
+                    }
+                } else {
+                    const errData = await res.json();
+                    aiMsg.textContent = "エラー: " + (errData.error || "通信に失敗しました。");
+                    aiMsg.style.color = "red";
+                }
+                history.appendChild(aiMsg);
+            } catch (e) {
+                const aiMsg = document.createElement('div');
+                aiMsg.className = 'chat-message ai';
+                aiMsg.textContent = "通信エラーが発生しました。";
+                aiMsg.style.color = "red";
+                history.appendChild(aiMsg);
+            } finally {
+                document.getElementById('chat-loading').style.display = 'none';
+                document.getElementById('chat-send').disabled = false;
+                history.scrollTop = history.scrollHeight;
+            }
+        }
+
+        document.getElementById('chat-send').addEventListener('click', sendChatMessage);
+        document.getElementById('chat-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendChatMessage();
+        });
+
+        function renderTurn() {
+            const data = simulationData[currentTurnIndex];
+            if (!data) return;
+
+            // Header state
+            document.getElementById('input-turn').value = data.turn;
+            document.getElementById('input-turn').max = simulationData.length;
+            document.getElementById('max-turn').textContent = simulationData.length;
+            document.getElementById('current-year').textContent = data.world_state.year;
+            document.getElementById('current-q').textContent = data.world_state.quarter;
+
+            // Buttons
+            document.getElementById('btn-prev').disabled = currentTurnIndex === 0;
+            document.getElementById('btn-next').disabled = currentTurnIndex === simulationData.length - 1;
+
+            // Countries Table
+            const tbody = document.querySelector('#countries-table tbody');
+            tbody.innerHTML = '';
+            for (const [name, info] of Object.entries(data.world_state.countries)) {
+                const tr = document.createElement('tr');
+                let ideologyTxt = info.ideology || '';
+                tr.innerHTML = `
+                    <td><strong>${name}</strong><br><small style="color:#7f8c8d; display:block; max-width: 250px; line-height:1.4; margin-top:4px;">${ideologyTxt}</small></td>
+                    <td>${info.government_type === 'democracy' ? '🗳️ 民主' : '👑 専制'}</td>
+                    <td>${Number(info.economy).toFixed(1)}</td>
+                    <td>${Number(info.military).toFixed(1)}</td>
+                    <td>${Number(info.approval_rating).toFixed(1)}%</td>
+                `;
+                tbody.appendChild(tr);
+            }
+
+            // Events
+            const eventsUl = document.getElementById('global-events');
+            eventsUl.innerHTML = '';
+            if (data.world_state.news_events && data.world_state.news_events.length > 0) {
+                data.world_state.news_events.forEach(ev => {
+                    const li = document.createElement('li');
+                    li.textContent = ev;
+                    eventsUl.appendChild(li);
+                });
+            } else {
+                eventsUl.innerHTML = '<li>平和なターンでした。</li>';
+            }
+
+            // Agents actions
+            const actionsDiv = document.getElementById('agent-actions');
+            actionsDiv.innerHTML = '';
+            for (const [name, action] of Object.entries(data.actions)) {
+                const wrap = document.createElement('div');
+                const title = document.createElement('div');
+                title.className = 'collapsible';
+                title.textContent = `▼ [${name}] の裏側`;
+
+                const content = document.createElement('div');
+                content.className = 'content active';
+
+                let dipTxt = '特になし';
+                if (action.diplomatic_policies.length > 0) {
+                    dipTxt = action.diplomatic_policies.map(d => {
+                        let res = `対${d.target_country} `;
+                        if (d.message) res += `[メッセージ送信] `;
+                        if (d.declare_war) res += `[🔴宣戦布告] `;
+                        if (d.propose_alliance) res += `[🤝同盟提案] `;
+                        if (d.espionage_gather_intel) res += `[🕵️情報収集: ${d.espionage_intel_strategy}] `;
+                        if (d.espionage_sabotage) res += `[💣破壊工作: ${d.espionage_sabotage_strategy}] `;
+                        return res;
+                    }).join('<br>');
+                }
+
+                content.innerHTML = `
+                    <div class="agent-thought"><strong>思考:</strong> ${action.thought_process}</div>
+                    <ul>
+                        <li><strong>内政投資:</strong> 経済 ${Math.round(action.domestic_policy.invest_economy * 100)}% | 軍事 ${Math.round(action.domestic_policy.invest_military * 100)}% | 福祉 ${Math.round(action.domestic_policy.invest_welfare * 100)}%</li>
+                        <li><strong>外交・工作方針:</strong><br>${dipTxt}</li>
+                    </ul>
+                `;
+
+                title.onclick = () => {
+                    content.classList.toggle('active');
+                    title.textContent = content.classList.contains('active') ? `▼ [${name}] の裏側` : `▶ [${name}] の裏側`;
+                };
+
+                wrap.appendChild(title);
+                wrap.appendChild(content);
+                actionsDiv.appendChild(wrap);
+            }
+
+            // SNS Logs
+            const snsDiv = document.getElementById('sns-logs');
+            snsDiv.innerHTML = '';
+            // 最終ターンのworld_stateから全ターンのログを取得
+            const finalWorldState = simulationData[simulationData.length - 1].world_state;
+            const allSnsLogs = finalWorldState.sns_logs || {};
+            for (const [name, logsArray] of Object.entries(allSnsLogs)) {
+                const currentTurnLog = logsArray.find(l => l.turn === data.turn);
+                if (currentTurnLog && currentTurnLog.posts.length > 0) {
+                    const wrap = document.createElement('div');
+                    wrap.style.marginBottom = '15px';
+                    let postsHtml = `<strong>[${name}] 支持率変動: ${currentTurnLog.total_modifier > 0 ? '+' : ''}${currentTurnLog.total_modifier.toFixed(1)}% (検閲: ${currentTurnLog.censored_count}件)</strong><ul style="margin-top: 5px; padding-left: 20px;">`;
+                    currentTurnLog.posts.forEach(p => {
+                        let style = p.censored ? 'text-decoration: line-through; color: #999;' : 'color: #333;';
+                        let prefix = p.censored ? '<span style="color: red; font-weight: bold; font-size: 0.8em;">[検閲済]</span>' : '';
+                        let authorIcon = p.author === 'Leader' ? '🏛️(首脳)' : p.author === 'Espionage' ? '🕶️(工作)' : '👤(国民)';
+                        postsHtml += `<li style="${style} margin-bottom: 5px;">${prefix} <strong style="color:#0056b3;">${authorIcon}</strong> ${p.post} <small style="color: #666;">(スコア: ${p.score.toFixed(2)})</small></li>`;
+                    });
+                    postsHtml += `</ul>`;
+                    wrap.innerHTML = postsHtml;
+                    snsDiv.appendChild(wrap);
+                }
+            }
+            if (snsDiv.innerHTML === '') {
+                snsDiv.innerHTML = '<p style="color: #666; font-style: italic;">このターンのSNS投稿はありません。</p>';
+            }
+
+            // Summit Logs
+            const summitDiv = document.getElementById('summit-logs');
+            summitDiv.innerHTML = '';
+            const allSummits = finalWorldState.summit_logs || [];
+            const currentTurnSummits = allSummits.filter(s => s.turn === data.turn);
+
+            if (currentTurnSummits.length > 0) {
+                currentTurnSummits.forEach((s, idx) => {
+                    const wrap = document.createElement('div');
+                    const title = document.createElement('div');
+                    title.className = 'collapsible';
+                    title.textContent = `▶ 会談: ${s.participants[0]} vs ${s.participants[1]} (議題: ${s.topic})`;
+
+                    const content = document.createElement('div');
+                    content.className = 'content';
+                    content.innerHTML = `<pre style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 4px; font-family: inherit; line-height: 1.5; font-size: 0.9em; border-left: 4px solid var(--accent-color);">${s.log}</pre>`;
+
+                    title.onclick = () => {
+                        content.classList.toggle('active');
+                        title.textContent = content.classList.contains('active') ? title.textContent.replace('▶', '▼') : title.textContent.replace('▼', '▶');
+                    };
+
+                    wrap.appendChild(title);
+                    wrap.appendChild(content);
+                    summitDiv.appendChild(wrap);
+                });
+            } else {
+                summitDiv.innerHTML = '<p style="color: #666; font-style: italic;">このターンに行われた首脳会談はありません。</p>';
+            }
+        }
+
+        document.getElementById('btn-prev').addEventListener('click', () => {
+            if (currentTurnIndex > 0) {
+                currentTurnIndex--;
+                renderTurn();
+            }
+        });
+        document.getElementById('btn-next').addEventListener('click', () => {
+            if (currentTurnIndex < simulationData.length - 1) {
+                currentTurnIndex++;
+                renderTurn();
+            }
+        });
+
+        document.getElementById('btn-jump').addEventListener('click', () => {
+            const val = parseInt(document.getElementById('input-turn').value, 10);
+            if (!isNaN(val) && val >= 1 && val <= simulationData.length) {
+                currentTurnIndex = val - 1;
+                renderTurn();
+            } else {
+                alert(`1 から ${simulationData.length} の間で入力してください。`);
+                document.getElementById('input-turn').value = currentTurnIndex + 1; // reset
+            }
+        });
+
+        document.getElementById('input-turn').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('btn-jump').click();
+            }
+        });
+
+        // Start
+        fetchSimulations();
+    </script>
+</body>
+
+</html>
