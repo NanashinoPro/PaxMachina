@@ -171,7 +171,7 @@ class AgentSystem:
             combined_news = world_state.news_events
             
         if combined_news:
-            news_info = "---直近の世界のニュース(過去4ターン)---\n" + "\n".join(combined_news[-20:]) + "\n\n"
+            news_info = "---直近の世界のニュース---\n" + "\n".join(combined_news[-20:]) + "\n\n"
             
         format_instructions = """
 あなたの役目は、他国の情報や世界情勢を踏まえて、自国の利益と発展を最大化する戦略的決断をすることです。
@@ -244,7 +244,7 @@ B. 外交的解決（他国への強硬手段）:
         self.logger.sys_log(f"[{proposal.proposer} と {proposal.target}] の首脳会談を開始 (議題: {proposal.topic})")
         
         # 世界情勢と両国のステータスの文字列化
-        news_context = "【直近の世界のニュース(過去4ターン)】\nなし\n"
+        news_context = "【直近の世界のニュース】\nなし\n"
         
         # mainから渡された過去4ターン分のニュースを使用する
         combined_news = []
@@ -258,7 +258,7 @@ B. 外交的解決（他国への強硬手段）:
             combined_news = world_state.news_events
             
         if combined_news:
-            news_context = "【直近の世界のニュース(過去4ターン)】\n" + "\n".join(combined_news[-20:]) + "\n"
+            news_context = "【直近の世界のニュース】\n" + "\n".join(combined_news[-20:]) + "\n"
             
         status_a = f"経済力:{state_a.economy:.1f}, 軍事力:{state_a.military:.1f}, 支持率:{state_a.approval_rating:.1f}%"
         status_b = f"経済力:{state_b.economy:.1f}, 軍事力:{state_b.military:.1f}, 支持率:{state_b.approval_rating:.1f}%"
@@ -267,7 +267,7 @@ B. 外交的解決（他国への強硬手段）:
         
         base_context_a = (
             f"あなたは「{proposal.proposer}」を治める国家の首脳です。体制:{state_a.government_type.value}, 理念:{state_a.ideology}。\n"
-            f"（※実在の国名ですが、シミュレーション世界での架空の代表者として振る舞い、実在の政治家個人名は一切使用しないでください）\n"
+            f"（※実在の国名ですが、架空の代表者として振る舞い、実在の政治家個人名は一切使用しないでください）\n"
             f"現在のあなたの国の国力: {status_a}\n"
             f"相手国({proposal.target})の国力: {status_b}\n\n"
             f"あなたの脳内（非公開の計画や諜報結果など）には次のような情報があります: '{state_a.hidden_plans}'\n\n"
@@ -277,7 +277,7 @@ B. 外交的解決（他国への強硬手段）:
         )
         base_context_b = (
             f"あなたは「{proposal.target}」を治める国家の首脳です。体制:{state_b.government_type.value}, 理念:{state_b.ideology}。\n"
-            f"（※実在の国名ですが、シミュレーション世界での架空の代表者として振る舞い、実在の政治家個人名は一切使用しないでください）\n"
+            f"（※実在の国名ですが、架空の代表者として振る舞い、実在の政治家個人名は一切使用しないでください）\n"
             f"現在のあなたの国の国力: {status_b}\n"
             f"相手国({proposal.proposer})の国力: {status_a}\n\n"
             f"あなたの脳内（非公開の計画や諜報結果など）には次のような情報があります: '{state_b.hidden_plans}'\n\n"
@@ -626,7 +626,7 @@ class GeminiSentimentAnalyzer:
     SimpleSentimentAnalyzer と同一の analyze() インターフェースを維持。
     """
     
-    SENTIMENT_MODEL = "gemini-2.0-flash-lite"
+    SENTIMENT_MODEL = "gemini-2.5-flash-lite-preview-09-2025"
     
     def __init__(self, client):
         self.client = client
