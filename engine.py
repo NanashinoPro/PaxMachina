@@ -40,7 +40,7 @@ DEFENDER_ADVANTAGE_MULTIPLIER = 1.2
 class WorldEngine:
     """世界の毎ターンの出来事を処理し、状態を更新するエンジン"""
     
-    def __init__(self, initial_state: WorldState):
+    def __init__(self, initial_state: WorldState, analyzer=None):
         self.state = initial_state
         self.events_this_turn: List[str] = []
         self.sys_logs_this_turn: List[str] = []
@@ -51,7 +51,8 @@ class WorldEngine:
         self.pending_rebellions: List[str] = []
         self.pending_elections: List[str] = []
         
-        self.analyzer = SimpleSentimentAnalyzer()
+        # 感情分析器（外部から注入。main.pyでAgentSystemのGeminiSentimentAnalyzerを渡す）
+        self.analyzer = analyzer
         self.turn_domestic_factors: Dict[str, Dict[str, float]] = {}
 
     def log_event(self, message: str):
@@ -976,19 +977,4 @@ class WorldEngine:
                 f"(内訳: 政治疲労{fatigue_decay:.1f}, GDP成長{growth_modifier:+.1f}, 福祉{welfare_bonus:+.1f}, 貿易恩恵{trade_bonus:+.1f}, メディア{media_mod:+.1f}, SNS世論{total_sns_modifier*0.5:+.1f})"
             )
 
-class SimpleSentimentAnalyzer:
-    """oseti（日本語感情分析ライブラリ）をベースにした感情分析器"""
-    def __init__(self):
-        import oseti
-        self._analyzer = oseti.Analyzer()
-        
-    def analyze(self, text: str) -> List[float]:
-        """テキストの感情を分析し、各文のスコア（-1.0〜+1.0）のリストを返す"""
-        try:
-            scores = self._analyzer.analyze(text)
-            if not scores:
-                return [0.0]
-            return [float(s) for s in scores]
-        except Exception:
-            return [0.0]
 
