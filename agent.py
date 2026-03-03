@@ -16,8 +16,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 class AgentSystem:
     """Gemini APIを使用して各国家の意思決定を行うAIエージェントシステム"""
-    
-    def __init__(self, logger: SimulationLogger, model_name: str = "gemini-3.1-pro-preview"): 
+    def __init__(self, logger: SimulationLogger, model_name: str = "gemini-2.5-pro"): 
         self.logger = logger
         # APIキーは環境変数から自動で読み込まれる想定
         api_key = os.environ.get("GEMINI_API_KEY")
