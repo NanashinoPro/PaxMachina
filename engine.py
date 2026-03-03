@@ -1,7 +1,7 @@
 import math
 import random
 from typing import Dict, List, Tuple
-from models import WorldState, CountryState, AgentAction, RelationType, GovernmentType, WarState, TradeState, SanctionState, SummitProposal
+from models import WorldState, CountryState, AgentAction, RelationType, GovernmentType, WarState, TradeState, SanctionState, SummitProposal, AllianceProposal
 
 # --- 定数（プロトコルパラメータ）定義 ---
 DEMOCRACY_WARN_APPROVAL = 40.0
@@ -283,10 +283,27 @@ class WorldEngine:
             if dip.message:
                 self.log_event(f"[{country_name} -> {target_name}] メッセージ送信: {dip.message}")
                 
-            # 同盟提案の処理 (簡易実装: 提案されたら即時中立から同盟に変わる。本来は合意が必要)
+            # 同盟提案の処理 (相互合意メカニズム: 相手も同ターンまたは前ターンにpropose_allianceしていれば成立)
             if dip.propose_alliance:
-                self._update_relation(country_name, target_name, RelationType.ALLIANCE)
-                self.log_event(f"🤝 {country_name}と{target_name}が軍事同盟を締結しました。")
+                rel = self._get_relation(country_name, target_name)
+                if rel == RelationType.AT_WAR:
+                    self.log_event(f"⚠️ {country_name}から{target_name}への同盟提案は戦争状態のため無効です。")
+                elif rel == RelationType.ALLIANCE:
+                    pass  # 既に同盟済み
+                else:
+                    # 前ターンに相手から提案が来ているか確認
+                    matched = [a for a in self.state.pending_alliances if a.proposer == target_name and a.target == country_name]
+                    if matched:
+                        # 双方合意成立！
+                        self._update_relation(country_name, target_name, RelationType.ALLIANCE)
+                        self.log_event(f"🤝 {country_name}と{target_name}が相互合意の上、軍事同盟を締結しました。")
+                        self.state.pending_alliances.remove(matched[0])
+                    else:
+                        # 提案をキューに積む（翌ターン以降に相手が受諾すれば成立）
+                        existing = [a for a in self.state.pending_alliances if a.proposer == country_name and a.target == target_name]
+                        if not existing:
+                            self.state.pending_alliances.append(AllianceProposal(proposer=country_name, target=target_name))
+                            self.log_event(f"✉️ {country_name}が{target_name}に対して軍事同盟を提案しました。（相手の合意を待機中）")
                 
             # 宣戦布告
             if dip.declare_war:
@@ -345,6 +362,11 @@ class WorldEngine:
         # 期限切れ提案のクリア（1ターンのみ有効）
         self.state.pending_summits = [s for s in self.state.pending_summits if s not in self.summits_to_run_this_turn]
         
+        # 同盟提案の期限切れクリア（同ターン内で双方合意が成立しなかった提案を除去）
+        # ※同ターン内で双方がpropose_allianceした場合は _process_diplomacy_and_espionage 内で既に処理済み
+        # 残った提案は次ターンまで保持し、次ターンの _process_diplomacy_and_espionage で再度チェックされる
+        # 2ターン以上放置された提案はここでクリアする（pending_alliances は翌ターンの処理前にリセット）
+        
         # 当期のNXをリセット
         for c_name, country in self.state.countries.items():
             country.last_turn_nx = 0.0
@@ -359,9 +381,9 @@ class WorldEngine:
             inv_economy = dom.get("inv_econ", 0.0)
             # engine.py内での統一を図るため、ここでは新モデルに合わせて再度S, I, G, Tを推定
             
-            # 1. 貯蓄率 (S)
+            # 1. 貯蓄率 (S) ※_process_domestic と同一の式を使用（ARCHITECTURE.md §2.2 準拠）
             base_s_rate = AUTHORITARIAN_BASE_SAVING_RATE if country.government_type == GovernmentType.AUTHORITARIAN else DEMOCRACY_BASE_SAVING_RATE
-            s_rate = max(0.05, base_s_rate - (inv_welfare * 0.3))
+            s_rate = max(0.15, base_s_rate - (inv_welfare * 0.15))
             
             # 簡略化のため、ISバランスの評価式に用いる名目上の算出
             # (S - I) + (T - G) = NX
