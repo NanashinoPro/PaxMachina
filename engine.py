@@ -495,6 +495,17 @@ class WorldEngine:
             
             target.economy *= (1.0 - damage_percent / 100.0)
             imposer.economy *= 0.99 # 発動国も1%の経済遅滞ダメージを受ける
+            
+            # 制裁による支持率ペナルティ（ARCHITECTURE.md §2.3 準拠）
+            target_approval_penalty = min(5.0, 1.0 * ratio)  # 対象国: GDP比率に応じて最大5%低下
+            imposer_approval_penalty = 0.5  # 発動国: 常に0.5%低下
+            target.approval_rating = max(0.0, target.approval_rating - target_approval_penalty)
+            imposer.approval_rating = max(0.0, imposer.approval_rating - imposer_approval_penalty)
+            self.sys_logs_this_turn.append(
+                f"[制裁ダメージ] {sanction.imposer} -> {sanction.target} | "
+                f"経済デバフ: -{damage_percent:.1f}% (発動国: -1.0%) | "
+                f"支持率ペナルティ: 対象国 -{target_approval_penalty:.1f}%, 発動国 -{imposer_approval_penalty:.1f}%"
+            )
 
     def _process_espionage(self, attacker_name: str, target_name: str, action):
         attacker = self.state.countries[attacker_name]
@@ -675,8 +686,9 @@ class WorldEngine:
                 
             # 체제別 イベント
             if country.government_type == GovernmentType.DEMOCRACY:
-                if country.approval_rating < CRITICAL_APPROVAL:
-                    self.log_event(f"⚠️ {name}で【政府機能麻痺】支持率が致命的に低下し、暴動により政権が崩壊しました！")
+                # 支持率が0%に達した場合のみクーデター発生（ARCHITECTURE.md §2.6 準拠）
+                if country.approval_rating <= 0.0:
+                    self.log_event(f"⚠️ {name}で【政府機能麻痺】支持率が0%に達し、暴動により政権が崩壊しました！")
                     self._handle_rebellion(name, country)
                     if country.turns_until_election is not None:
                         country.turns_until_election = 16 # 米国の場合4年(16ターン)リセット
@@ -805,8 +817,8 @@ class WorldEngine:
         self.log_event(f"🚩 【体制変化】クーデターの結果、{name}は{gov_str}新政権({new_gov.value})へと移行しました。")
         
         country.approval_rating = 40.0
-        country.military *= 0.5 # 内戦による軍事力低下
-        country.economy *= 0.7  # 内戦による経済ダメージ
+        country.economy *= 0.9   # 内戦による経済ダメージ（10%減）
+        country.military = country.economy * 0.1  # 軍事力をGDPの10%にリセット
         self.pending_rebellions.append(name)
 
     def advance_time(self):
