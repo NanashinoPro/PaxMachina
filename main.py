@@ -46,7 +46,7 @@ def initialize_world() -> WorldState:
         },
         active_wars=[],
         active_trades=[TradeState(country_a="アメリカ", country_b="中国")],
-        news_events=["シミュレーションが開始されました。世界のリーダーたちが行動を開始します。"]
+        news_events=["世界のリーダーたちが行動を開始しています。"]
     )
     return world
 
