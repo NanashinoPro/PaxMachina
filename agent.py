@@ -159,7 +159,10 @@ class AgentSystem:
         combined_news = []
         if past_news:
             for turn_news in past_news:
-                combined_news.extend(turn_news)
+                if isinstance(turn_news, (list, tuple)):
+                    combined_news.extend(turn_news)
+                else:
+                    combined_news.append(turn_news)
         else:
             combined_news = world_state.news_events
             
@@ -242,7 +245,10 @@ B. 外交的解決（他国への強硬手段）:
         combined_news = []
         if past_news:
             for turn_news in past_news:
-                combined_news.extend(turn_news)
+                if isinstance(turn_news, (list, tuple)):
+                    combined_news.extend(turn_news)
+                else:
+                    combined_news.append(turn_news)
         else:
             combined_news = world_state.news_events
             
