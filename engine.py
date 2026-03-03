@@ -19,17 +19,17 @@ BASE_MILITARY_MAINTENANCE_ALPHA = 0.03
 MAX_MILITARY_FATIGUE_ALPHA = 0.20
 
 # マクロ経済モデル (SNA基準) の新しい定数
-BASE_INVESTMENT_RATE = 0.15          # 基礎的な民間投資性向
-GOVERNMENT_CROWD_IN_MULTIPLIER = 0.5 # 経済予算が民間投資を誘発する乗数
-GOVERNMENT_CROWD_OUT_MULTIPLIER = 0.2# 軍事予算が民間投資を抑制する乗数
+BASE_INVESTMENT_RATE = 0.14          # 基礎的な民間投資性向
+GOVERNMENT_CROWD_IN_MULTIPLIER = 0.3 # 経済予算が民間投資を誘発する乗数
+GOVERNMENT_CROWD_OUT_MULTIPLIER = 0.1# 軍事予算が民間投資を抑制する乗数
 TAX_APPROVAL_PENALTY_MULTIPLIER = 200.0 # 増税1%につき支持率が2%低下する係数
 DEBT_TO_GDP_PENALTY_THRESHOLD = 1.0  # 債務対GDP比が100%を超えるとペナルティ発生
 DEBT_INTEREST_RATE = 0.02            # 国家債務の利払い金利（2%）
 
 # 貿易・マクロ経済モデルの定数
 MACRO_TAX_RATE = 0.30 # (旧定数。今後各国の可変 tax_rate で上書き)
-DEMOCRACY_BASE_SAVING_RATE = 0.18
-AUTHORITARIAN_BASE_SAVING_RATE = 0.45
+DEMOCRACY_BASE_SAVING_RATE = 0.25
+AUTHORITARIAN_BASE_SAVING_RATE = 0.30
 TRADE_GRAVITY_FRICTION_ALLIANCE = 1.0
 TRADE_GRAVITY_FRICTION_NEUTRAL = 2.0
 
@@ -160,10 +160,12 @@ class WorldEngine:
         total_inv = inv_econ + inv_mil + inv_wel
         if total_inv <= 0.0:
             inv_econ, inv_mil, inv_wel = 0.33, 0.33, 0.34 # 異常時のフォールバック
-        elif total_inv != 1.0:
+            total_inv = 1.0
+        elif total_inv > 1.0:
             inv_econ /= total_inv
             inv_mil /= total_inv
             inv_wel /= total_inv
+            total_inv = 1.0
 
         # 政府支出(G)のブレイクダウン
         g_econ = budget * inv_econ * execution_power
@@ -173,32 +175,39 @@ class WorldEngine:
 
         # 基礎貯蓄率 (政治体制と福祉投資による低下)
         base_s_rate = AUTHORITARIAN_BASE_SAVING_RATE if country.government_type == GovernmentType.AUTHORITARIAN else DEMOCRACY_BASE_SAVING_RATE
-        saving_rate = max(0.05, base_s_rate - (inv_wel * 0.3))
+        saving_rate = max(0.15, base_s_rate - (inv_wel * 0.15))
 
         # 1. 民間消費 (C)
         # ケインズ型消費関数: C = (Y - T) * (1 - s)
         # 増税すると即座に消費が減る
         C = max(0.0, (old_gdp - tax_revenue) * (1.0 - saving_rate))
+        S_private = max(0.0, (old_gdp - tax_revenue) - C)
 
         # 2. 民間投資 (I)
-        # 基礎投資 + 経済インフラ投資によるクラウドイン(誘発) - 軍事費によるクラウドアウト(抑制)
-        I = max(0.0, old_gdp * BASE_INVESTMENT_RATE + (g_econ * GOVERNMENT_CROWD_IN_MULTIPLIER) - (g_mil * GOVERNMENT_CROWD_OUT_MULTIPLIER))
+        # 民間貯蓄の85%が国内投資に向かう (S -> I の還流)
+        # それに加え、経済インフラ投資によるクラウドイン(誘発) - 軍事費によるクラウドアウト(抑制)を考慮
+        I = max(0.0, S_private * 0.85 + (g_econ * GOVERNMENT_CROWD_IN_MULTIPLIER) - (g_mil * GOVERNMENT_CROWD_OUT_MULTIPLIER))
         
         # -- 災害・技術革新のフロー影響を適用 --
         disaster_damage_sum = sum(d.damage_percent for d in self.state.disaster_history if d.turn == self.state.turn and (d.country == country_name or d.country is None))
         
         breakthrough_multiplier = 1.0
         for bt in self.state.active_breakthroughs:
+            # 古すぎる技術革新は陳腐化し、追加のボーナスを生まない
+            if bt.turns_active > 20:
+                continue
             if bt.origin_country == country_name and not bt.spread_globally:
-                breakthrough_multiplier += random.uniform(0.5, 1.0) # 投資・消費に対する強力なバフ
+                breakthrough_multiplier += random.uniform(0.05, 0.15) # 投資に対するバフを現実的な範囲に
             elif bt.spread_globally:
-                breakthrough_multiplier += random.uniform(0.1, 0.2)
+                breakthrough_multiplier += random.uniform(0.01, 0.05)
+                
+        # 強制的にキャップをかける（バブル抑制）
+        breakthrough_multiplier = min(1.30, breakthrough_multiplier)
         
         I *= breakthrough_multiplier
 
-        # 次ターンのGDP(Y)の暫定算出 = C + I + G (NXは後で別メソッドで処理するため一時保留)
-        # ※ここでは閉鎖経済モデル部分のみ。あとで貿易システム側で補正しても良いが、今回はモデル統合として NX=0 スタートの成長を算出
-        new_gdp_provisional = C + I + G
+        # 次ターンのGDP(Y)の暫定算出 = C + I + G + NX
+        new_gdp_provisional = C + I + G + country.last_turn_nx
         
         # 災害ダメージは当期の経済から直接引く（巨大な資本破壊）
         if disaster_damage_sum > 0:
@@ -213,7 +222,7 @@ class WorldEngine:
         if debt_to_gdp > DEBT_TO_GDP_PENALTY_THRESHOLD:
             # 100%超過分につき経済にデバフがかかる
             excess = debt_to_gdp - DEBT_TO_GDP_PENALTY_THRESHOLD
-            penalty = 1.0 - min(0.10, excess * 0.05) # 最大10%のGDP押し下げ
+            penalty = 1.0 - min(0.05, excess * 0.02) # 最大5%のGDP押し下げ
             new_gdp_provisional *= penalty
             if self.state.turn % 5 == 0:
                  self.sys_logs_this_turn.append(f"[{country.name} 債務超過] 対GDP比{debt_to_gdp:.1%}により経済成長減退")
@@ -251,7 +260,8 @@ class WorldEngine:
             "inv_wel": inv_wel,
             "trade_support_bonus": 0.0,
             "inv_econ": inv_econ,
-            "inv_mil": inv_mil
+            "inv_mil": inv_mil,
+            "total_inv": total_inv
         }
             
         self.sys_logs_this_turn.append(
@@ -335,8 +345,10 @@ class WorldEngine:
     def _process_trade_and_sanctions(self):
         # 期限切れ提案のクリア（1ターンのみ有効）
         self.state.pending_summits = [s for s in self.state.pending_summits if s not in self.summits_to_run_this_turn]
-        # ただし、新しく提案されたものは残すため、ここでは受諾処理済みのリストから削除することで対応済み。
-        # ターン跨ぎの提案を削除するためにリストを空にする（新しく提案されたものは _process_diplomacy_and_espionage で追加済みなので工夫が必要だが、ここでは簡易的に残すか、古いものを消すか。実装上、_process_diplomacy_and_espionage より前に空にするよう main.py 等で調整すべきだが今回は維持）
+        
+        # 当期のNXをリセット
+        for c_name, country in self.state.countries.items():
+            country.last_turn_nx = 0.0
 
         # Trade (IS Balance / Trade Deficit Model)
         # まず全国家のISバランス(貯蓄・投資バランス)を算出
@@ -355,12 +367,14 @@ class WorldEngine:
             # 簡略化のため、ISバランスの評価式に用いる名目上の算出
             # (S - I) + (T - G) = NX
             T = country.economy * country.tax_rate
-            G = country.government_budget # 予算全額を使い切る想定
-            C = (country.economy - T) * (1.0 - s_rate)
-            S_private = (country.economy - T) - C # 民間貯蓄
+            # G は前ターンの投資合計割合を予算に掛けたものと推定する
+            G = country.government_budget * dom.get("total_inv", 1.0)
             
-            # I はインフラ投資額に比例すると仮定
-            I = country.economy * BASE_INVESTMENT_RATE + (G * inv_economy * GOVERNMENT_CROWD_IN_MULTIPLIER)
+            C = (country.economy - T) * (1.0 - s_rate)
+            S_private = max(0.0, (country.economy - T) - C) # 民間貯蓄
+            
+            # I は民間貯蓄の85% + インフラ投資により誘発されると仮定
+            I = max(0.0, S_private * 0.85 + (G * inv_economy * GOVERNMENT_CROWD_IN_MULTIPLIER))
             
             # IS方程式に基づく経常収支(NX)理論値
             nx_theoretical = (S_private - I) + (T - G)
@@ -377,6 +391,13 @@ class WorldEngine:
             # 重力モデルに基づくベース取引量: 経済規模の平方根に比例、摩擦に反比例
             base_volume = math.sqrt(ca.economy * cb.economy) / friction
             
+            # 制裁によるGravity Modelハイブリッド介入
+            sanctions_exist = any(s for s in self.state.active_sanctions if 
+                                 (s.imposer == trade.country_a and s.target == trade.country_b) or
+                                 (s.imposer == trade.country_b and s.target == trade.country_a))
+            if sanctions_exist:
+                base_volume *= 0.05 # 制裁中は貿易額が95%減少
+            
             nx_a = macro_balances[trade.country_a]
             nx_b = macro_balances[trade.country_b]
             
@@ -384,17 +405,17 @@ class WorldEngine:
             diff = nx_a - nx_b
             # 取引量の一部が赤字国から黒字国へ国富として移転
             # (diffが正ならAが黒字[輸出超過]、Bが赤字[輸入超過])
-            deficit_transfer = (diff / max(1.0, ca.economy + cb.economy)) * base_volume * 5.0
+            deficit_transfer = (diff / max(1.0, ca.economy + cb.economy)) * base_volume * 1.5
             
             mutual_bonus = base_volume * 0.005 # 貿易による共通の経済効率化ボーナス
             
             # 【SNA基準への改修】GDP(economy)からの直接減算を廃止。
-            # 純輸出(NX)をGDPに加算し、赤字分は国家債務に追加
+            # 純輸出(NX)を記録し、赤字分は国家債務に追加
             ca_nx = mutual_bonus + deficit_transfer
             cb_nx = mutual_bonus - deficit_transfer
             
-            ca.economy = max(1.0, ca.economy + ca_nx)
-            cb.economy = max(1.0, cb.economy + cb_nx)
+            ca.last_turn_nx += ca_nx
+            cb.last_turn_nx += cb_nx
             
             # 赤字国は資金不足を海外からの借入（対外債務）で補う
             if ca_nx < 0:
@@ -413,10 +434,8 @@ class WorldEngine:
                 ca.trade_deficit_counter = max(0, ca.trade_deficit_counter - 1)
                 
                 if cb.trade_deficit_counter > 3:
-                    penalty = (cb.trade_deficit_counter - 3) * 1.5
+                    penalty = min(5.0, (cb.trade_deficit_counter - 3) * 1.5) # ペナルティ上限を5%に
                     cb_support -= penalty
-                    # GDP成長率のペナルティとしても即時反映(経済を減算。0以下への転落を防ぐ)
-                    cb.economy = max(1.0, cb.economy - base_volume * 0.01 * penalty)
                     self.sys_logs_this_turn.append(f"[Trade Penalty] {trade.country_b} は不均衡な貿易赤字による国内産業の空洞化・失業増(-{penalty:.1f})に苦しんでいます")
             else:
                 # Aが赤字
@@ -426,9 +445,8 @@ class WorldEngine:
                 cb.trade_deficit_counter = max(0, cb.trade_deficit_counter - 1)
                 
                 if ca.trade_deficit_counter > 3:
-                    penalty = (ca.trade_deficit_counter - 3) * 1.5
+                    penalty = min(5.0, (ca.trade_deficit_counter - 3) * 1.5) # ペナルティ上限を5%に
                     ca_support -= penalty
-                    ca.economy = max(1.0, ca.economy - base_volume * 0.01 * penalty)
                     self.sys_logs_this_turn.append(f"[Trade Penalty] {trade.country_a} は不均衡な貿易赤字による国内産業の空洞化・失業増(-{penalty:.1f})に苦しんでいます")
                 
             if trade.country_a in self.turn_domestic_factors:
@@ -884,10 +902,15 @@ class WorldEngine:
             fatigue_decay = -0.5 - ((old_approval - 50.0) * 0.01 if old_approval > 50.0 else 0)
             
             # Apply dynamic factors with carefully tuned weights
+            growth_modifier = gdp_growth * 0.5
+            if gdp_growth < -5.0:
+                # 深刻な不況（5%以上のマイナス成長）には非線形なペナルティを課す（大恐慌レベルの支持率暴落）
+                growth_modifier -= (abs(gdp_growth) - 5.0) ** 1.5
+                
             new_approval = (
                 base_trend 
                 + fatigue_decay              # Natural political fatigue decay
-                + (gdp_growth * 0.5)         # max typically 1-2 points per turn
+                + growth_modifier            # Dynamic GDP growth/collapse modifier
                 + (media_mod * 1.0)          # max +-5.0
                 + (total_sns_modifier * 0.5) # max +-1.5
                 + welfare_bonus              # based on log curve approx -2.0 to +2.5
@@ -903,7 +926,7 @@ class WorldEngine:
 
             self.sys_logs_this_turn.append(
                 f"[{country.name} 支持率更新] {old_approval:.1f}% -> {country.approval_rating:.1f}% "
-                f"(内訳: 政治疲労{fatigue_decay:.1f}, GDP成長{gdp_growth*0.5:+.1f}, 福祉{welfare_bonus:+.1f}, 貿易恩恵{trade_bonus:+.1f}, メディア{media_mod:+.1f}, SNS世論{total_sns_modifier*0.5:+.1f})"
+                f"(内訳: 政治疲労{fatigue_decay:.1f}, GDP成長{growth_modifier:+.1f}, 福祉{welfare_bonus:+.1f}, 貿易恩恵{trade_bonus:+.1f}, メディア{media_mod:+.1f}, SNS世論{total_sns_modifier*0.5:+.1f})"
             )
 
 class SimpleSentimentAnalyzer:
