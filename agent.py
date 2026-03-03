@@ -58,7 +58,7 @@ class AgentSystem:
                 print(f"⚠️ {country_name}のエージェント推論中にエラーが発生しました: {e}")
                 traceback.print_exc()
                 # エラー時は安全のためにデフォルトの休眠アクションを割り当てる
-                actions[country_name] = self._create_fallback_action(country_name)
+                actions[country_name] = self._create_fallback_action(country_name, current_tax_rate=country_state.tax_rate)
                 
         return actions
 
@@ -82,7 +82,7 @@ class AgentSystem:
         except Exception as e:
             self.logger.sys_log(f"[{country_name}] APIエラー発生: {e}", "ERROR")
             print(f"[{country_name}] API Error: {e}")
-            return self._create_fallback_action(country_name)
+            return self._create_fallback_action(country_name, current_tax_rate=country_state.tax_rate)
             
         elapsed = time.time() - start_time
         self.logger.sys_log(f"[{country_name}] APIレスポンス受信完了 (所要時間: {elapsed:.2f}秒)")
@@ -601,15 +601,16 @@ B. 外交的解決（他国への強硬手段）:
                 
         return reports, media_modifiers
 
-    def _create_fallback_action(self, country_name: str) -> AgentAction:
-        """APIエラー等が起きた場合の安全なデフォルトアクション（現状維持）を返す"""
+    def _create_fallback_action(self, country_name: str, current_tax_rate: float = 0.30) -> AgentAction:
+        """APIエラー等が起きた場合の安全なデフォルトアクション。前ターンの税率を維持し現状維持に努める"""
         return AgentAction(
-            thought_process="状況判断に問題が発生したため、現状維持に努める。",
+            thought_process="APIエラーのため前ターンの政策を継続する（現状維持）。",
             domestic_policy=DomesticAction(
-                invest_economy=0.7,
+                tax_rate=current_tax_rate,
+                invest_economy=0.60,
                 reasoning_for_military_investment="状況が不確実なため、基本的な軍備維持に留める。",
-                invest_military=0.03,
-                invest_welfare=0.27
+                invest_military=0.10,
+                invest_welfare=0.30
             ),
             diplomatic_policies=[]
         )

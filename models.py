@@ -106,6 +106,11 @@ class SanctionState(BaseModel):
     imposer: str = Field(..., description="制裁を発動している国")
     target: str = Field(..., description="制裁対象の国")
 
+class AllianceProposal(BaseModel):
+    """同盟提案の保留中のリクエスト（相互合意メカニズム）"""
+    proposer: str = Field(..., description="同盟を提案した国")
+    target: str = Field(..., description="提案された国")
+
 class SummitProposal(BaseModel):
     """首脳会談の保留中の提案"""
     proposer: str
@@ -141,6 +146,7 @@ class WorldState(BaseModel):
     active_trades: List[TradeState] = Field(default_factory=list, description="有効な貿易協定リスト")
     active_sanctions: List[SanctionState] = Field(default_factory=list, description="発動中の経済制裁リスト")
     pending_summits: List[SummitProposal] = Field(default_factory=list, description="前ターンに提案された首脳会談のリスト")
+    pending_alliances: List[AllianceProposal] = Field(default_factory=list, description="前ターンに提案された同盟のリスト（相互合意メカニズム）")
     active_breakthroughs: List[BreakthroughState] = Field(default_factory=list, description="現在進行中の技術革新")
     disaster_history: List[DisasterEvent] = Field(default_factory=list, description="過去に発生した重大災害の履歴")
     

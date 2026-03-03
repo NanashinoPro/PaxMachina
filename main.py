@@ -1,6 +1,7 @@
 import time
 import json
 import os
+import random
 from models import WorldState, CountryState, GovernmentType, RelationType, TradeState
 from engine import WorldEngine
 from agent import AgentSystem
@@ -54,7 +55,17 @@ def main():
     parser = argparse.ArgumentParser(description="AI Diplomacy Simulation")
     parser.add_argument("--turns", type=int, default=40, help="Number of turns to run")
     parser.add_argument("--resume", type=str, help="Path to a simulation log file (.jsonl) to resume from", default=None)
+    parser.add_argument("--seed", type=int, default=None, help="乱数シード（再現性のために設定推奨）")
     args = parser.parse_args()
+    
+    # --- 再現性のための乱数シード設定 ---
+    if args.seed is not None:
+        random.seed(args.seed)
+        print(f"🔒 乱数シード固定: {args.seed}")
+    else:
+        seed = random.randint(0, 2**32 - 1)
+        random.seed(seed)
+        print(f"🔒 乱数シード（自動生成）: {seed}")
     
     if args.resume:
         if not os.path.exists(args.resume):
@@ -78,11 +89,13 @@ def main():
             session_id = None
             
         logger = SimulationLogger(session_id=session_id)
+        logger.sys_log(f"[Reproducibility] 乱数シード: {args.seed if args.seed is not None else 'auto'}")
         print(f"--- 🌍 AI外交シミュレーション (Turn {world_state.turn} から再開) ---")
     else:
         # システム初期化
         world_state = initialize_world()
         logger = SimulationLogger()
+        logger.sys_log(f"[Reproducibility] 乱数シード: {args.seed if args.seed is not None else 'auto'}")
         print("--- 🌍 AI外交シミュレーション ---")
 
     engine = WorldEngine(initial_state=world_state)
