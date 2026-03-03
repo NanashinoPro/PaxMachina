@@ -1,5 +1,14 @@
 # System Log
 
+## 2026-03-03 20:54:00 感情分析エンジンの Gemini API への移行 (S-2)
+- **oseti → Gemini API (`gemini-2.0-flash-lite`) への移行 (`agent.py`, `engine.py`, `main.py`)**:
+  - `engine.py` から `SimpleSentimentAnalyzer`（oseti依存）クラスを完全削除。
+  - `agent.py` に `GeminiSentimentAnalyzer` クラスを新規追加。Gemini API に短いプロンプトで感情スコア(-1.0〜+1.0)を問い合わせる。
+  - `WorldEngine.__init__` に `analyzer` 引数を追加し、外部から感情分析器を注入する設計に変更。
+  - `main.py` で `AgentSystem.sentiment_analyzer` を `WorldEngine` に注入する接続を構築。
+  - **移行理由**: oseti は2019年以降メンテナンス停止、政治・外交ドメインの専門語に対する精度が不明。LLMベースの感情分析は文脈理解力が高く、政治文脈での判定精度向上が期待される。
+- **ARCHITECTURE.md**: §1.2 LLMタスク割り当てに感情分析モデル (`gemini-2.0-flash-lite`) の記載を追加。
+
 ## 2026-03-03 20:47:00 学術コードレビュー Should Fix 4件の修正
 - **S-1: コメントの学術的改善 (`engine.py`)**:
   - 政策実行力、民間投資(I)、リチャードソン・モデル、福祉ボーナスの4箇所のコメントを「何を」ではなく「なぜ」を説明する形に改善。Harrod-Domar (1939/1946)、Richardson (1960)、Paul Kennedy (1987)、Gossen (1854) 等の学術的引用を追加。

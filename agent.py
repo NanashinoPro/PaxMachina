@@ -26,9 +26,8 @@ class AgentSystem:
         self.client = genai.Client(api_key=api_key, http_options={'timeout': 60000}) # タイムアウトを60秒に設定
         self.model_name = model_name
         
-        # S-3: SimpleSentimentAnalyzer のシングルトン生成（osetiの辞書読み込みコストを削減）
-        from engine import SimpleSentimentAnalyzer
-        self.sentiment_analyzer = SimpleSentimentAnalyzer()
+        # S-2: Gemini APIベースの感情分析器（osetiから移行, 政治・外交ドメインに高精度）
+        self.sentiment_analyzer = GeminiSentimentAnalyzer(self.client)
         
         # コスト計算用のトラッカー
         self.token_usage = {}
@@ -618,3 +617,51 @@ B. 外交的解決（他国への強硬手段）:
             ),
             diplomatic_policies=[]
         )
+
+class GeminiSentimentAnalyzer:
+    """Gemini API (gemini-2.0-flash-lite) を用いた感情分析器。
+    
+    oseti の辞書ベース分析から移行。政治・外交ドメインのテキストに対して
+    LLMの文脈理解力を活用し、高精度な感情スコアを返す。
+    SimpleSentimentAnalyzer と同一の analyze() インターフェースを維持。
+    """
+    
+    SENTIMENT_MODEL = "gemini-2.0-flash-lite"
+    
+    def __init__(self, client):
+        self.client = client
+    
+    def analyze(self, text: str) -> list:
+        """テキストの感情を分析し、感情スコア（-1.0〜+1.0）のリストを返す。
+        
+        APIエラー時は安全なデフォルト値 [0.0] を返す。
+        """
+        try:
+            prompt = (
+                "以下のテキストの感情をスコアで評価してください。\n"
+                "スコアは -1.0（非常にネガティブ）から +1.0（非常にポジティブ）の範囲で、"
+                "小数点1桁の数値のみを返してください。複数文がある場合はカンマ区切りで返してください。\n"
+                "例: 0.3 や -0.5,0.2 のように数値のみ返してください。説明は不要です。\n\n"
+                f"テキスト: {text[:300]}"  # プロンプト膨張防止のため300文字に制限
+            )
+            
+            response = self.client.models.generate_content(
+                model=self.SENTIMENT_MODEL,
+                contents=prompt
+            )
+            
+            raw = response.text.strip()
+            # カンマ区切りのスコアをパース
+            scores = []
+            for part in raw.replace(" ", "").split(","):
+                try:
+                    score = float(part)
+                    score = max(-1.0, min(1.0, score))  # クランプ
+                    scores.append(score)
+                except ValueError:
+                    continue
+            
+            return scores if scores else [0.0]
+            
+        except Exception:
+            return [0.0]

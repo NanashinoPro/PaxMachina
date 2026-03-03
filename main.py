@@ -98,14 +98,15 @@ def main():
         logger.sys_log(f"[Reproducibility] 乱数シード: {args.seed if args.seed is not None else 'auto'}")
         print("--- 🌍 AI外交シミュレーション ---")
 
-    engine = WorldEngine(initial_state=world_state)
-    
     try:
-        agent_system = AgentSystem(logger=logger) # デフォルトで 3.1-pro-preview を使用
+        agent_system = AgentSystem(logger=logger)
     except ValueError as e:
         print(f"初期化エラー: {e}")
         print("実行前に `export GEMINI_API_KEY=あなたのキー` を設定してください。")
         return
+
+    # S-2: AgentSystemのGemini感情分析器をエンジンに注入
+    engine = WorldEngine(initial_state=world_state, analyzer=agent_system.sentiment_analyzer)
 
     # シミュレーションループ
     MAX_TURNS = args.turns
