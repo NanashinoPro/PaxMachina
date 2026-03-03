@@ -199,6 +199,7 @@ B. 外交的解決（他国への強硬手段）:
   ],
   "update_hidden_plans": "次回以降のターンに引き継ぐべき非公開の計画・長期戦略のメモ（目標達成や状況の重大な変化があれば動的に再定義すること）",
   "domestic_policy": {
+    "tax_rate": 0.10から0.70の数値,
     "invest_economy": 0.0から1.0の数値,
     "reasoning_for_military_investment": "リチャードソン・モデル（相手の脅威、自国の経済的負担、潜在的敵意）に基づく軍事投資割合の論理的算出プロセス",
     "invest_military": 0.0から1.0の数値,
