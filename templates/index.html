@@ -299,6 +299,7 @@
                                     <th>体制</th>
                                     <th>経済力</th>
                                     <th>軍事力</th>
+                                    <th>諜報力</th>
                                     <th>支持率</th>
                                 </tr>
                             </thead>
@@ -535,6 +536,7 @@
                     <td>${info.government_type === 'democracy' ? '🗳️ 民主' : '👑 専制'}</td>
                     <td>${Number(info.economy).toFixed(1)}</td>
                     <td>${Number(info.military).toFixed(1)}</td>
+                    <td>${Number(info.intelligence_level || 0).toFixed(1)}</td>
                     <td>${Number(info.approval_rating).toFixed(1)}%</td>
                 `;
                 tbody.appendChild(tr);
@@ -581,7 +583,7 @@
                 content.innerHTML = `
                     <div class="agent-thought"><strong>思考:</strong> ${action.thought_process}</div>
                     <ul>
-                        <li><strong>内政投資:</strong> 経済 ${Math.round(action.domestic_policy.invest_economy * 100)}% | 軍事 ${Math.round(action.domestic_policy.invest_military * 100)}% | 福祉 ${Math.round(action.domestic_policy.invest_welfare * 100)}%</li>
+                        <li><strong>内政投資:</strong> 経済 ${Math.round(action.domestic_policy.invest_economy * 100)}% | 軍事 ${Math.round(action.domestic_policy.invest_military * 100)}% | 福祉 ${Math.round(action.domestic_policy.invest_welfare * 100)}% | 諜報 ${Math.round((action.domestic_policy.invest_intelligence || 0) * 100)}%</li>
                         <li><strong>外交・工作方針:</strong><br>${dipTxt}</li>
                     </ul>
                 `;

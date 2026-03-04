@@ -37,6 +37,10 @@ TRADE_GRAVITY_FRICTION_NEUTRAL = 2.0
 
 # 戦争モデルの定数
 DEFENDER_ADVANTAGE_MULTIPLIER = 1.2
+
+# 諜報モデルの定数
+INTEL_GROWTH_RATE = 0.02           # 諜報投資の成長率（軍事と同スケール）
+INTEL_MAINTENANCE_ALPHA = 0.05     # 諜報技術の陳腐化率（毎ターン5%減衰）
 # ------------------------------------
 
 class WorldEngine:
@@ -182,23 +186,26 @@ class WorldEngine:
         inv_econ = action.domestic_policy.invest_economy
         inv_mil = action.domestic_policy.invest_military
         inv_wel = action.domestic_policy.invest_welfare
+        inv_intel = getattr(action.domestic_policy, 'invest_intelligence', 0.0)
         
         # 予算の総和を1.0に正規化（安全装置）
-        total_inv = inv_econ + inv_mil + inv_wel
+        total_inv = inv_econ + inv_mil + inv_wel + inv_intel
         if total_inv <= 0.0:
-            inv_econ, inv_mil, inv_wel = 0.33, 0.33, 0.34 # 異常時のフォールバック
+            inv_econ, inv_mil, inv_wel, inv_intel = 0.33, 0.33, 0.34, 0.0 # 異常時のフォールバック
             total_inv = 1.0
         elif total_inv > 1.0:
             inv_econ /= total_inv
             inv_mil /= total_inv
             inv_wel /= total_inv
+            inv_intel /= total_inv
             total_inv = 1.0
 
         # 政府支出(G)のブレイクダウン
         g_econ = budget * inv_econ * execution_power
         g_mil = budget * inv_mil * execution_power
         g_wel = budget * inv_wel * execution_power
-        G = g_econ + g_mil + g_wel
+        g_intel = budget * inv_intel * execution_power
+        G = g_econ + g_mil + g_wel + g_intel
 
         # 政府の未執行予算（余剰金）を算出
         S_gov = max(0.0, budget - G)
@@ -299,6 +306,11 @@ class WorldEngine:
         old_approval = country.approval_rating
         welfare_trend = math.log1p(inv_wel * 5.0) * 1.5 - 1.0
         welfare_bonus = welfare_trend * execution_power
+
+        # --- 諜報レベルの蓄積・減衰（リチャードソンモデルと同様のパターン）---
+        old_intel = country.intelligence_level
+        intel_growth = g_intel * INTEL_GROWTH_RATE
+        country.intelligence_level = (country.intelligence_level * (1.0 - INTEL_MAINTENANCE_ALPHA)) + intel_growth
             
         self.turn_domestic_factors[country_name] = {
             "gdp_growth_rate": gdp_growth_rate,
@@ -315,6 +327,7 @@ class WorldEngine:
             f"税率:{new_tax_rate:.1%} (税収:{tax_revenue:.1f}) | 予算(G):{budget:.1f} | "
             f"経済力(GDP):{old_gdp:.1f} -> {country.economy:.1f} ({new_gdp_provisional - old_gdp:+.1f}), "
             f"軍事力:{old_military:.1f} -> {country.military:.1f} (+{military_growth:.1f}, 維持費: -{alpha*100:.1f}%), "
+            f"諜報レベル:{old_intel:.1f} -> {country.intelligence_level:.1f} (+{intel_growth:.1f}), "
             f"支持率:{old_approval:.1f}% -> {country.approval_rating:.1f}%"
         )
 
@@ -558,21 +571,21 @@ class WorldEngine:
         attacker = self.state.countries[attacker_name]
         target = self.state.countries[target_name]
         
-        # 諜報力の定義（経済力と軍事力の合計値ベース）
-        attacker_power = attacker.economy + attacker.military
-        target_power = target.economy + target.military
-        power_ratio = (attacker_power - target_power) / max(1.0, target_power)
+        # 諜報力の定義（intelligence_levelベース）
+        attacker_intel = attacker.intelligence_level
+        target_intel = target.intelligence_level
+        intel_ratio = (attacker_intel - target_intel) / max(1.0, target_intel)
         
         if action.espionage_sabotage:
             # 破壊工作の判定
-            # 成功率 (基本15%、最大35%)
-            sabotage_success_base = 0.15 + (power_ratio * 0.1)
-            sabotage_success_chance = max(0.05, min(0.35, sabotage_success_base))
+            # 成功率 (基本15%、キャップなし)
+            sabotage_success_base = 0.15 + (intel_ratio * 0.15)
+            sabotage_success_chance = max(0.05, sabotage_success_base)
             is_success = random.random() < sabotage_success_chance
             
-            # 発覚率 (基本25%、能力差で変動)
-            sabotage_discovery_base = 0.25 - (power_ratio * 0.2)
-            discovery_chance = max(0.10, min(0.50, sabotage_discovery_base))
+            # 発覚率 (基本25%、能力差で変動、下限のみ)
+            sabotage_discovery_base = 0.25 - (intel_ratio * 0.20)
+            discovery_chance = max(0.05, sabotage_discovery_base)
             is_discovered = random.random() < discovery_chance
             
             strategy = action.espionage_sabotage_strategy.lower()
@@ -618,14 +631,14 @@ class WorldEngine:
 
         if action.espionage_gather_intel:
             # 情報収集の判定
-            # 成功率 (基本30%、最大60%)
-            intel_success_base = 0.30 + (power_ratio * 0.1)
-            intel_success_chance = max(0.15, min(0.60, intel_success_base))
+            # 成功率 (基本30%、キャップなし)
+            intel_success_base = 0.30 + (intel_ratio * 0.15)
+            intel_success_chance = max(0.15, intel_success_base)
             is_success = random.random() < intel_success_chance
 
-            # 発覚率 (基本10%、能力差で変動)
-            intel_discovery_base = 0.10 - (power_ratio * 0.1)
-            discovery_chance = max(0.05, min(0.30, intel_discovery_base))
+            # 発覚率 (基本10%、下限のみ)
+            intel_discovery_base = 0.10 - (intel_ratio * 0.10)
+            discovery_chance = max(0.05, intel_discovery_base)
             is_discovered = random.random() < discovery_chance
             
             if is_success:
@@ -872,6 +885,7 @@ class WorldEngine:
         country.trade_deficit_counter = 0
         country.last_turn_nx = 0.0
         country.rebellion_risk = 0.0
+        country.intelligence_level = 0.0  # 諜報組織も崩壊・リセット
         
         self.pending_rebellions.append(name)
 

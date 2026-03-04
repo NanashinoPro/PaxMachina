@@ -28,6 +28,7 @@ class CountryState(BaseModel):
     tax_rate: float = Field(0.30, ge=0.0, le=1.0, description="現在の租税負担率（0.0-1.0）")
     press_freedom: float = Field(..., ge=0.0, le=1.0, description="現在の報道の自由度（0.0-1.0。低いほど情報統制されるが国民不満が高まる）")
     military: float = Field(..., description="軍事力")
+    intelligence_level: float = Field(0.0, description="諜報レベル（蓄積される諜報・技術力。invest_intelligence投資により成長し、諜報活動の成功率に直結する）")
     area: float = Field(0.0, description="領土の面積（平方キロメートル）")
     approval_rating: float = Field(..., ge=0, le=100, description="国民の支持率（安定度: 0-100）")
     
@@ -54,6 +55,7 @@ class DomesticAction(BaseModel):
     reasoning_for_military_investment: str = Field(..., description="リチャードソン・モデル（相手の脅威、自国の経済的負担、潜在的敵意）に基づく軍事投資割合の論理的算出プロセス")
     invest_military: float = Field(..., description="軍備増強への投資割合（0.0-1.0）")
     invest_welfare: float = Field(..., description="治安・福祉維持（支持率維持）への投資割合（0.0-1.0）")
+    invest_intelligence: float = Field(0.0, description="諜報・技術開発への投資割合（0.0-1.0。諜報レベルを蓄積し、諜報活動の成功率を向上させる）")
 
 class DiplomaticAction(BaseModel):
     """特定のターゲット国へ向けた外交・軍事・諜報アクション"""

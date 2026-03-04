@@ -122,6 +122,7 @@ class AgentSystem:
             f"---現在のステータス---\n"
             f"経済力(GDP): {country_state.economy:.1f}\n"
             f"軍事力: {country_state.military:.1f}\n"
+            f"諜報レベル: {country_state.intelligence_level:.1f}（高いほど諜報活動の成功率が向上し、敵の諜報を返り討ちやすくなる）\n"
             f"現在の税率: {country_state.tax_rate:.1%}\n"
             f"政府予算(税収 - 利払い): {country_state.government_budget:.1f}\n"
             f"直近の貿易収支(NX): {country_state.last_turn_nx:+.1f} (マイナスは赤字流出を意味)\n"
@@ -170,6 +171,7 @@ class AgentSystem:
                 f"- {p_name} ({p_state.government_type.value}): "
                 f"経済力={p_state.economy:.1f}, "
                 f"軍事力={p_state.military:.1f}, "
+                f"諜報力={p_state.intelligence_level:.1f}, "
                 f"関係={rel.value}{war_info}\n"
             )
             
@@ -224,6 +226,12 @@ B. 外交的解決（他国への強硬手段）:
 また、目標となる**「報道の自由度 (target_press_freedom)」**を必ず指定してください。0.0から1.0の値です。
 自由度を下げて情報統制を敷けば、あなたの「update_hidden_plans」などの秘密工作がマスメディアのスクープ（内部告発）によって暴かれる確率を劇的に下げることができますが、強権的な統制に対する国民の反発により、**即座に支持率が大きく低下するペナルティ**が発生します。逆に自由度を高く保つと支持率は安定・向上しますが、権力監視が働きスキャンダルが露呈しやすくなります。このトレードオフを「thought_process」で考察し、「target_press_freedom」を決定してください。
 
+【諜報投資（invest_intelligence）の決定ルール】
+invest_intelligenceに予算を割り当てることで、自国の「諜報レベル」が毎ターン蓄積されます。諜報レベルは以下に直結します。
+- 情報収集や破壊工作の成功率が上昇する（諜報レベルが相手より高いほど有利）
+- 敵の諜報活動が発覚されやすくなる（相手の諜報レベルより低いと、破壊工作やスパイのなすがままになる）
+ただし、諜報技術は毎ターン自然に陳腐化するため、継続的な投資が必要です。予算配分のトレードオフ（経済・軍事・福祉・諜報の4項目が合計1.0）を考慮して決定してください。
+
 以下のJSONスキーマに従って出力してください。必ずJSONオブジェクトのみを出力し、それ以外のテキストは含めないでください。
 {
   "thought_process": "あなたの戦略、思考、内心の計画（150文字程度。ここで他国への貿易・制裁・会談の意図も含めること）",
@@ -237,7 +245,8 @@ B. 外交的解決（他国への強硬手段）:
     "invest_economy": 0.0から1.0の数値,
     "reasoning_for_military_investment": "リチャードソン・モデル（相手の脅威、自国の経済的負担、潜在的敵意）に基づく軍事投資割合の論理的算出プロセス",
     "invest_military": 0.0から1.0の数値,
-    "invest_welfare": 0.0から1.0の数値
+    "invest_welfare": 0.0から1.0の数値,
+    "invest_intelligence": 0.0から1.0の数値（諜報・技術開発への投資。諜報レベルを蓄積し、諜報活動の成功率に直結する）
   },
   "diplomatic_policies": [
     {
@@ -653,10 +662,11 @@ B. 外交的解決（他国への強硬手段）:
             thought_process="APIエラーのため前ターンの政策を継続する（現状維持）。",
             domestic_policy=DomesticAction(
                 tax_rate=current_tax_rate,
-                invest_economy=0.60,
+                invest_economy=0.50,
                 reasoning_for_military_investment="状況が不確実なため、基本的な軍備維持に留める。",
                 invest_military=0.10,
-                invest_welfare=0.30
+                invest_welfare=0.30,
+                invest_intelligence=0.10
             ),
             diplomatic_policies=[]
         )

@@ -1,5 +1,23 @@
 # System Log
 
+## 2026-03-04 18:20:00 諜報投資パラメータ（invest_intelligence）の新規実装と成功率キャップ撤廃
+- **`models.py`**:
+  - `CountryState` に `intelligence_level: float` を追加（諜報レベルの蓄積値）。
+  - `DomesticAction` に `invest_intelligence: float` を追加（諜報・技術開発への予算投資割合）。
+- **`engine.py`**:
+  - 定数 `INTEL_GROWTH_RATE = 0.02`, `INTEL_MAINTENANCE_ALPHA = 0.05` を追加。
+  - `_process_domestic` に諜報レベルの蓄積・減衰処理（リチャードソン・モデルと同構造）を実装。予算配分を4項目（経済・軍事・福祉・諜報）の合計1.0に正規化。
+  - `_process_espionage` の判定基準を `economy + military` ベースの `power_ratio` から `intelligence_level` ベースの `intel_ratio` に完全移行。
+  - 成功率・発覚率の上限キャップ（min/max）を撤廃し、下限のみ維持（破壊工作成功率: 下限5%、情報収集成功率: 下限15%、発覚率: 下限5%）。
+  - `_handle_rebellion` にてクーデター時に `intelligence_level = 0.0` にリセット。
+- **`agent.py`**:
+  - `_build_prompt` に自国の諜報レベル、他国の諜報力、諜報投資の効果説明を追加。
+  - JSON出力スキーマに `invest_intelligence` フィールドを追加。
+  - `_create_fallback_action` に `invest_intelligence=0.10` を追加。
+- **`main.py`**: 初期状態のアメリカ・中国に `intelligence_level=0.0` を追加。
+- **`templates/index.html`**: 国家ステータステーブルに「諜報力」列を追加、内政投資表示に「諜報」を追加。
+- **`ARCHITECTURE.md`**: §1.3.2 に状態変数 $IL$ を追加、§2.1 に $G_{intel}$ を追加、§2.5 を `intelligence_level` ベースの新計算式に全面更新。
+
 ## 2026-03-05 18:20:00 コンソール出力順序の再定義とロガー機能の強化
 - **`logger.py`**:
   - `SimulationLogger` に `display_section_header` (セクション区切り) および `display_category_events` (カテゴリ別イベントパネル) メソッドを追加。
