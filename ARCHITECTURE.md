@@ -68,11 +68,16 @@ $$
 $$G_{econ} = Budget \times InvEcon \times \epsilon, \quad G_{mil} = Budget \times InvMil \times \epsilon, \quad G_{wel} = Budget \times InvWel \times \epsilon$$
 ※ 上式における $Budget$ は §2.2 で算出される実質政府予算、$InvEcon, InvMil, InvWel$ はLLMが決定する投資割合（合計1.0に正規化済み）を表す。
 
-#### 増税ペナルティ (Tax Penalty)
+#### 増額・減税ペナルティとボーナス (Tax Penalty and Bonus)
 *   `TAX_APPROVAL_PENALTY_MULTIPLIER = 200.0`
+*   `TAX_REDUCTION_APPROVAL_BONUS_MULTIPLIER = 100.0`
 前ターンより税率（$Tax Rate$）を上昇させた場合、政治的コストとして即座に支持率が低下する。
 $$ \Delta Approval = -(\Delta TaxRate \times 200.0) $$
 例: 税率を10% ($0.1$) 引き上げた場合、支持率は $-20.0\%$ 低下する。
+
+逆に税率を引き下げた場合、国民の負担軽減効果として即座に支持率に還元されるボーナスが発生する。
+$$ \Delta Approval = +(|\Delta TaxRate| \times 100.0) $$
+例: 税率を2% ($0.02$) 引き下げた場合、支持率は $+2.0\%$ 上昇する。
 
 ### 2.2. マクロ経済モデル (SNAベース: Y = C + I + G + NX)
 
@@ -87,7 +92,8 @@ $$ \Delta Approval = -(\Delta TaxRate \times 200.0) $$
     *   `AUTHORITARIAN_BASE_SAVING_RATE = 0.30`
     *   福祉投資 ($InvWel$) により民間貯蓄率 $s$ が低下する（消費指向になる）。
     *   $s = \max(0.15,\ \text{BaseSavingRate} - InvWel \times 0.15)$
-    *   $C = (Y_{t-1} - T_{est}) \times (1 - s)$
+    *   $C_{base} = (Y_{t-1} - T_{est}) \times (1 - s)$
+    *   減税時のみ、消費活性化ボーナスが乗算される（$C = C_{base} \times (1.0 + |\Delta TaxRate| \times 2.0)$）。増税時は $C = C_{base}$。
 3.  **民間投資 ($I$)**:
     *   民間貯蓄 $S_{private} = (Y_{t-1} - T_{est}) - C$
     *   `GOVERNMENT_CROWD_IN_MULTIPLIER = 0.3` (インフラ投資等による民間投資誘発)
