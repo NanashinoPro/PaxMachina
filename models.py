@@ -48,7 +48,7 @@ class CountryState(BaseModel):
 
 class DomesticAction(BaseModel):
     """内政アクション（予充分配: 合計100%になること）"""
-    tax_rate: float = Field(0.30, description="当期の目標税率（0.10〜0.70等。上げることで予算は増えるが消費と支持率が即時に低下する）")
+    tax_rate: float = Field(0.30, description="当期の目標税率（0.10〜0.70等。上げることで予算は増えるが消費と支持率が即時に低下する。下げることで支持率上昇と経済成長ボーナスが得られる）")
     target_press_freedom: float = Field(..., description="当期目標とする報道の自由度（0.0〜1.0。下げるほど秘密裏の工作が暴露されにくくなるが、強権的な統制により即座に支持率が大きく低下するペナルティがある）")
     invest_economy: float = Field(..., description="経済成長への投資割合（0.0-1.0）")
     reasoning_for_military_investment: str = Field(..., description="リチャードソン・モデル（相手の脅威、自国の経済的負担、潜在的敵意）に基づく軍事投資割合の論理的算出プロセス")
