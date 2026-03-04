@@ -3,6 +3,7 @@ import glob
 import json
 import re
 from pathlib import Path
+import argparse
 
 def get_max_turn_from_jsonl(file_path):
     """.jsonlファイルの最終行からターン数を取得する"""
@@ -70,5 +71,7 @@ def cleanup_logs(threshold=3):
         print(f"\n合計 {len(deleted_files)} 個のファイルを削除しました。")
 
 if __name__ == "__main__":
-    # デフォルトで3ターン以下のログを削除
-    cleanup_logs(threshold=3)
+    parser = argparse.ArgumentParser(description="指定したターン数以下のログファイルを削除します。")
+    parser.add_argument("-t", "--threshold", type=int, default=3, help="削除するターン数の閾値 (デフォルト: 3)")
+    args = parser.parse_args()
+    cleanup_logs(threshold=args.threshold)
