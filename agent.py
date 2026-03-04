@@ -136,9 +136,23 @@ class AgentSystem:
         
         my_info += f"あなたの脳内（非公開の計画など）には次のような情報があります: '{country_state.hidden_plans}'\n\n"
         
+        # 制裁情報の付与
+        active_sanctions = world_state.active_sanctions if hasattr(world_state, 'active_sanctions') else []
+        my_sanctions = [s for s in active_sanctions if s.imposer == country_name]
+        sanctions_against_me = [s for s in active_sanctions if s.target == country_name]
+        if my_sanctions or sanctions_against_me:
+            my_info += "---現在の経済制裁の状況---\n"
+            if my_sanctions:
+                targets = ", ".join([s.target for s in my_sanctions])
+                my_info += f"発動中の制裁(対象国): {targets} （対象国の経済にダメージを与えつつ自国政治支持を利用できますが、自国経済にも僅かな悪影響があります）\n"
+            if sanctions_against_me:
+                imposers = ", ".join([s.imposer for s in sanctions_against_me])
+                my_info += f"受けている制裁(発動国): {imposers} （経済に深刻なダメージが発生中です）\n"
+            my_info += "\n"
+            
         # 他国の情報
         other_info = "---世界の状況---\n"
-        other_info += f"現在は {world_state.year}年 第{world_state.quarter}四半期 (ターン {world_state.turn}) です。\n"
+        other_info += f"現在は {world_state.year}年 第{world_state.quarter}四半期 です。\n"
         
         for p_name, p_state in world_state.countries.items():
             if p_name == country_name: continue
@@ -160,18 +174,28 @@ class AgentSystem:
             
         # ニュースイベント
         news_info = ""
-        combined_news = []
         if past_news:
-            for turn_news in past_news:
-                if isinstance(turn_news, (list, tuple)):
-                    combined_news.extend(turn_news)
+            news_info = "---直近1年(4四半期)の世界のニュース---\n"
+            for i, turn_news in enumerate(past_news):
+                # past_newsの最後が「直前の四半期」になるため、world_state.turn基準で遡る
+                t = world_state.turn - len(past_news) + i
+                if t > 0:
+                    y = 2024 + (t - 1) // 4
+                    q = ((t - 1) % 4) + 1
+                    news_info += f"【{y}年 第{q}四半期】\n"
                 else:
-                    combined_news.append(turn_news)
-        else:
-            combined_news = world_state.news_events
-            
-        if combined_news:
-            news_info = "---直近の世界のニュース---\n" + "\n".join(combined_news[-20:]) + "\n\n"
+                    news_info += "【過去のニュース】\n"
+                
+                if isinstance(turn_news, (list, tuple)):
+                    if not turn_news:
+                        news_info += "特になし\n"
+                    else:
+                        news_info += "\n".join(f"- {n}" for n in turn_news) + "\n"
+                else:
+                    news_info += f"- {turn_news}\n"
+            news_info += "\n"
+        elif world_state.news_events:
+            news_info = "---直近のニュース---\n" + "\n".join(f"- {n}" for n in world_state.news_events[-20:]) + "\n\n"
             
         format_instructions = """
 あなたの役目は、他国の情報や世界情勢を踏まえて、自国の利益と発展を最大化する戦略的決断をすることです。
@@ -244,21 +268,34 @@ B. 外交的解決（他国への強硬手段）:
         self.logger.sys_log(f"[{proposal.proposer} と {proposal.target}] の首脳会談を開始 (議題: {proposal.topic})")
         
         # 世界情勢と両国のステータスの文字列化
-        news_context = "【直近の世界のニュース】\nなし\n"
-        
-        # mainから渡された過去4ターン分のニュースを使用する
-        combined_news = []
+        news_context = "【直近1年(4四半期)の世界のニュース】\n"
+        has_news = False
         if past_news:
-            for turn_news in past_news:
-                if isinstance(turn_news, (list, tuple)):
-                    combined_news.extend(turn_news)
+            for i, turn_news in enumerate(past_news):
+                t = world_state.turn - len(past_news) + i
+                if t > 0:
+                    y = 2024 + (t - 1) // 4
+                    q = ((t - 1) % 4) + 1
+                    news_context += f"〔{y}年 第{q}四半期〕\n"
                 else:
-                    combined_news.append(turn_news)
-        else:
-            combined_news = world_state.news_events
+                    news_context += "〔過去のニュース〕\n"
+                
+                if isinstance(turn_news, (list, tuple)):
+                    if not turn_news:
+                        news_context += "特になし\n"
+                    else:
+                        news_context += "\n".join(f"- {n}" for n in turn_news) + "\n"
+                    has_news = True
+                elif turn_news:
+                    news_context += f"- {turn_news}\n"
+                    has_news = True
+            news_context += "\n"
+        elif world_state.news_events:
+            news_context += "\n".join(f"- {n}" for n in world_state.news_events[-20:]) + "\n\n"
+            has_news = True
             
-        if combined_news:
-            news_context = "【直近の世界のニュース】\n" + "\n".join(combined_news[-20:]) + "\n"
+        if not has_news:
+            news_context = "【直近1年の世界のニュース】\nなし\n"
             
         status_a = f"経済力:{state_a.economy:.1f}, 軍事力:{state_a.military:.1f}, 支持率:{state_a.approval_rating:.1f}%"
         status_b = f"経済力:{state_b.economy:.1f}, 軍事力:{state_b.military:.1f}, 支持率:{state_b.approval_rating:.1f}%"
