@@ -599,9 +599,9 @@
             // SNS Logs
             const snsDiv = document.getElementById('sns-logs');
             snsDiv.innerHTML = '';
-            // 最終ターンのworld_stateから全ターンのログを取得
-            const finalWorldState = simulationData[simulationData.length - 1].world_state;
-            const allSnsLogs = finalWorldState.sns_logs || {};
+            // 現在のターンのworld_stateからログを取得（最終ターンからだと履歴がトリミングされている可能性があるため）
+            const currentWorldState = data.world_state;
+            const allSnsLogs = currentWorldState.sns_logs || {};
             for (const [name, logsArray] of Object.entries(allSnsLogs)) {
                 const currentTurnLog = logsArray.find(l => l.turn === data.turn);
                 if (currentTurnLog && currentTurnLog.posts.length > 0) {
@@ -626,7 +626,7 @@
             // Summit Logs
             const summitDiv = document.getElementById('summit-logs');
             summitDiv.innerHTML = '';
-            const allSummits = finalWorldState.summit_logs || [];
+            const allSummits = currentWorldState.summit_logs || [];
             const currentTurnSummits = allSummits.filter(s => s.turn === data.turn);
 
             if (currentTurnSummits.length > 0) {
