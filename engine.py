@@ -22,6 +22,7 @@ MAX_MILITARY_FATIGUE_ALPHA = 0.20
 BASE_INVESTMENT_RATE = 0.14          # 基礎的な民間投資性向
 GOVERNMENT_CROWD_IN_MULTIPLIER = 0.3 # 経済予算が民間投資を誘発する乗数
 GOVERNMENT_CROWD_OUT_MULTIPLIER = 0.1# 軍事予算が民間投資を抑制する乗数
+DEBT_REPAYMENT_CROWD_IN_MULTIPLIER = 0.8 # 政府の余剰金・債務返済が民間投資市場に還流する乗数
 TAX_APPROVAL_PENALTY_MULTIPLIER = 200.0 # 増税1%につき支持率が2%低下する係数
 DEBT_TO_GDP_PENALTY_THRESHOLD = 1.0  # 債務対GDP比が100%を超えるとペナルティ発生
 DEBT_INTEREST_RATE = 0.02            # 国家債務の利払い金利（2%）
@@ -175,6 +176,16 @@ class WorldEngine:
         g_wel = budget * inv_wel * execution_power
         G = g_econ + g_mil + g_wel
 
+        # 政府の未執行予算（余剰金）を算出
+        S_gov = max(0.0, budget - G)
+        
+        # 国家債務の自動返済
+        if S_gov > 0.0:
+            repayment = min(country.national_debt, S_gov)
+            country.national_debt -= repayment
+            if repayment > 0.1:
+                self.sys_logs_this_turn.append(f"[{country.name} 債務返済] 未執行予算にて {repayment:.1f} を返済 (政府貯蓄: {S_gov:.1f})")
+
         # 基礎貯蓄率 (政治体制と福祉投資による低下)
         base_s_rate = AUTHORITARIAN_BASE_SAVING_RATE if country.government_type == GovernmentType.AUTHORITARIAN else DEMOCRACY_BASE_SAVING_RATE
         saving_rate = max(0.15, base_s_rate - (inv_wel * 0.15))
@@ -190,7 +201,8 @@ class WorldEngine:
         # 資本市場を通じて国内投資へ還流すると仮定。係数0.85は国内投資率を表し、
         # 残15%は海外流出・現預金積み上げ等として処理。
         # 政府の経済投資は民間投資を誘発（クラウドイン）し、軍事費が民間投資を押し出す（クラウドアウト）。
-        I = max(0.0, S_private * 0.85 + (g_econ * GOVERNMENT_CROWD_IN_MULTIPLIER) - (g_mil * GOVERNMENT_CROWD_OUT_MULTIPLIER))
+        # 民間貯蓄に加え、政府の未執行予算(S_gov)が金融市場を通じて民間投資に還流する
+        I = max(0.0, S_private * 0.85 + (S_gov * DEBT_REPAYMENT_CROWD_IN_MULTIPLIER) + (g_econ * GOVERNMENT_CROWD_IN_MULTIPLIER) - (g_mil * GOVERNMENT_CROWD_OUT_MULTIPLIER))
         
         # -- 災害・技術革新のフロー影響を適用 --
         disaster_damage_sum = sum(d.damage_percent for d in self.state.disaster_history if d.turn == self.state.turn and (d.country == country_name or d.country is None))
