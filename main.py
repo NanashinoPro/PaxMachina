@@ -206,8 +206,7 @@ def main():
                 ca = world_state.countries.get(proposal.proposer)
                 cb = world_state.countries.get(proposal.target)
                 if ca and cb:
-                    past_4_turns_news = [news for turn_news in past_news_queue for news in turn_news]
-                    summit_news_result, full_summit_log = agent_system.run_summit(proposal, ca, cb, world_state, past_news=past_4_turns_news)
+                    summit_news_result, full_summit_log = agent_system.run_summit(proposal, ca, cb, world_state, past_news=past_news_queue)
                     world_state.news_events.append(summit_news_result)
                     recent_summit_logs.append(full_summit_log)
                     world_state.summit_logs.append({
