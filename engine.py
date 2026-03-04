@@ -147,6 +147,25 @@ class WorldEngine:
         interest_payment = country.national_debt * DEBT_INTEREST_RATE
         
         # 税収T = GDP * 税率 (※前ターンのGDPをベースにする)
+        # 報道の自由度の更新とペナルティ計算
+        # 自由度を急激に制限（下げる）すると、国民の不満によって支持率が大きく下落する
+        target_freedom = getattr(action.domestic_policy, 'target_press_freedom', country.press_freedom)
+        freedom_diff = target_freedom - country.press_freedom
+        
+        if freedom_diff < -0.05:
+            # 自由度を下げた場合: 0.1の制限につき、支持率-5%程度のペナルティ
+            freedom_penalty = abs(freedom_diff) * 50.0
+            country.approval_rating = max(0.0, country.approval_rating - freedom_penalty)
+            self.sys_logs_this_turn.append(f"[{country.name} 報道統制] 自由度低下({freedom_diff:+.2f})により支持率急落 -{freedom_penalty:.1f}%")
+        elif freedom_diff > 0.05:
+            # 自由度を上げた場合: 0.1の緩和につき、支持率+2%程度のボーナス（統制解除による限定的な支持回復）
+            freedom_bonus = freedom_diff * 20.0
+            country.approval_rating = min(100.0, country.approval_rating + freedom_bonus)
+            self.sys_logs_this_turn.append(f"[{country.name} 情報公開] 自由度上昇({freedom_diff:+.2f})により支持率回復 +{freedom_bonus:.1f}%")
+        
+        # 自由度の数値を更新
+        country.press_freedom = target_freedom
+
         tax_revenue = old_gdp * country.tax_rate
         
         # 政府予算 (G全体のキャップ)

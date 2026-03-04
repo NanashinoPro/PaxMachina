@@ -26,6 +26,7 @@ def initialize_world() -> WorldState:
                 approval_rating=55.0,
                 turns_until_election=16, 
                 rebellion_risk=0.0,
+                press_freedom=0.6549, 
                 hidden_plans=""
             ),
             "中国": CountryState(
@@ -37,6 +38,7 @@ def initialize_world() -> WorldState:
                 area=9596960.0,
                 approval_rating=70.0,
                 rebellion_risk=5.0,
+                press_freedom=0.2241, 
                 hidden_plans=""
             )
         },

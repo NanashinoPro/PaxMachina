@@ -127,6 +127,7 @@ class AgentSystem:
             f"直近の貿易収支(NX): {country_state.last_turn_nx:+.1f} (マイナスは赤字流出を意味)\n"
             f"国家債務(National Debt): {country_state.national_debt:.1f}\n"
             f"国民の支持率: {country_state.approval_rating:.1f}% (30%未満で危険)\n"
+            f"報道の自由度: {country_state.press_freedom:.3f} (0.0-1.0。低いほど情報統制されるが不満が高まる)\n"
         )
         
         if country_state.turns_until_election is not None:
@@ -220,6 +221,9 @@ B. 外交的解決（他国への強硬手段）:
 【非公開計画（update_hidden_plans）の動的更新ルール】
 入力された情報（例：自国と他国の国力の逆転、戦争の終結など）と現在の目標を照らし合わせてください。もし「現在の目標が達成された」あるいは「重大なフェーズ変化が起きた」、または「工作・諜報活動が失敗し続けている」と認識した場合は、過去の計画に固執せず、それを破棄して「新たなフェーズに向けた目標」や「別のアプローチ」を柔軟に再定義してください。
 
+また、目標となる**「報道の自由度 (target_press_freedom)」**を必ず指定してください。0.0から1.0の値です。
+自由度を下げて情報統制を敷けば、あなたの「update_hidden_plans」などの秘密工作がマスメディアのスクープ（内部告発）によって暴かれる確率を劇的に下げることができますが、強権的な統制に対する国民の反発により、**即座に支持率が大きく低下するペナルティ**が発生します。逆に自由度を高く保つと支持率は安定・向上しますが、権力監視が働きスキャンダルが露呈しやすくなります。このトレードオフを「thought_process」で考察し、「target_press_freedom」を決定してください。
+
 以下のJSONスキーマに従って出力してください。必ずJSONオブジェクトのみを出力し、それ以外のテキストは含めないでください。
 {
   "thought_process": "あなたの戦略、思考、内心の計画（150文字程度。ここで他国への貿易・制裁・会談の意図も含めること）",
@@ -229,6 +233,7 @@ B. 外交的解決（他国への強硬手段）:
   "update_hidden_plans": "次回以降のターンに引き継ぐべき非公開の計画・長期戦略のメモ（目標達成や状況の重大な変化があれば動的に再定義すること）",
   "domestic_policy": {
     "tax_rate": 0.10から0.70の数値,
+    "target_press_freedom": 0.0から1.0の数値,
     "invest_economy": 0.0から1.0の数値,
     "reasoning_for_military_investment": "リチャードソン・モデル（相手の脅威、自国の経済的負担、潜在的敵意）に基づく軍事投資割合の論理的算出プロセス",
     "invest_military": 0.0から1.0の数値,
@@ -560,20 +565,23 @@ B. 外交的解決（他国への強硬手段）:
                 
                 # 内部告発（スクープ）の動的確率計算
                 whistleblowing_scandal = ""
-                if country_state.government_type == GovernmentType.DEMOCRACY:
-                    base_prob = 5
-                    if country_state.approval_rating < 50.0:
-                        base_prob += int((50.0 - country_state.approval_rating) / 2.0)
-                    if country_state.hidden_plans:
-                        base_prob += 10
-                    base_prob = min(base_prob, 30)
-                    
-                    if random.randint(1, 100) <= base_prob and country_state.hidden_plans:
-                        whistleblowing_scandal = (
-                            f"【大スクープ（内部告発）発生】政権内部からのリークにより、これまで非公開だった以下の秘密計画に関連した一大スキャンダルが提供されました。\n"
-                            f"ターゲット秘密情報: {country_state.hidden_plans}\n"
-                            f"指示: この情報を基に、政権の腐敗（買収、隠蔽、汚職、非道徳的な工作など）といった具体的なスキャンダル要素をあなた自身で創作・追加して、政府を激しく追及・批判する特大スクープ記事を生成してください。（※支持率が大きくマイナスになるように）\n\n"
-                        )
+                
+                # 報道の自由度に基づき、全体制でスクープ発生の可能性を持たせる
+                base_prob = 5
+                if country_state.approval_rating < 50.0:
+                    base_prob += int((50.0 - country_state.approval_rating) / 2.0)
+                if country_state.hidden_plans:
+                    base_prob += 10
+                base_prob = min(base_prob, 30)
+                
+                final_prob = int(base_prob * country_state.press_freedom)
+                
+                if random.randint(1, 100) <= final_prob and country_state.hidden_plans:
+                    whistleblowing_scandal = (
+                        f"【大スクープ（内部告発）発生】政権内部からのリークにより、これまで非公開だった以下の秘密計画に関連した一大スキャンダルが提供されました。\n"
+                        f"ターゲット秘密情報: {country_state.hidden_plans}\n"
+                        f"指示: この情報を基に、政権の腐敗（買収、隠蔽、汚職、非道徳的な工作など）といった具体的なスキャンダル要素をあなた自身で創作・追加して、政府を激しく追及・批判する特大スクープ記事を生成してください。（※支持率が大きくマイナスになるように）\n\n"
+                    )
 
                 if country_state.government_type == GovernmentType.DEMOCRACY:
                     role_desc = "あなたは自由民主主義国家の独立した報道機関（メディア）です。「第四の権力」として政府を監視しますが、極秘の諜報活動（成功したスパイ活動や工作プロセス等）を知ることはできず、国内外で公開された政策決断、経済指標、他国で起きたニュースのみに基づいて報道・論評します。失敗や不都合な事実には厳しく批判（支持率マイナス）しますが、経済成長や外交的合意などの成果に対しては適切に称賛し、国民の支持を向上させます（支持率プラス +1.0 ~ +5.0）。単に批判や事実を並べるだけでなく、良い結果には必ずプラスの評価をしてください。"

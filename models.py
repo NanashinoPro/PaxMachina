@@ -26,6 +26,7 @@ class CountryState(BaseModel):
     government_budget: float = Field(0.0, description="政府の裁量で使える次ターン向け予算（税収等）")
     national_debt: float = Field(0.0, description="国家累積債務（財政赤字・貿易赤字等の累積）")
     tax_rate: float = Field(0.30, ge=0.0, le=1.0, description="現在の租税負担率（0.0-1.0）")
+    press_freedom: float = Field(..., ge=0.0, le=1.0, description="現在の報道の自由度（0.0-1.0。低いほど情報統制されるが国民不満が高まる）")
     military: float = Field(..., description="軍事力")
     area: float = Field(0.0, description="領土の面積（平方キロメートル）")
     approval_rating: float = Field(..., ge=0, le=100, description="国民の支持率（安定度: 0-100）")
@@ -48,6 +49,7 @@ class CountryState(BaseModel):
 class DomesticAction(BaseModel):
     """内政アクション（予充分配: 合計100%になること）"""
     tax_rate: float = Field(0.30, description="当期の目標税率（0.10〜0.70等。上げることで予算は増えるが消費と支持率が即時に低下する）")
+    target_press_freedom: float = Field(..., description="当期目標とする報道の自由度（0.0〜1.0。下げるほど秘密裏の工作が暴露されにくくなるが、強権的な統制により即座に支持率が大きく低下するペナルティがある）")
     invest_economy: float = Field(..., description="経済成長への投資割合（0.0-1.0）")
     reasoning_for_military_investment: str = Field(..., description="リチャードソン・モデル（相手の脅威、自国の経済的負担、潜在的敵意）に基づく軍事投資割合の論理的算出プロセス")
     invest_military: float = Field(..., description="軍備増強への投資割合（0.0-1.0）")
