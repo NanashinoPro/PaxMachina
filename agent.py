@@ -180,7 +180,7 @@ class AgentSystem:
                 # past_newsの最後が「直前の四半期」になるため、world_state.turn基準で遡る
                 t = world_state.turn - len(past_news) + i
                 if t > 0:
-                    y = 2024 + (t - 1) // 4
+                    y = 2025 + (t - 1) // 4
                     q = ((t - 1) % 4) + 1
                     news_info += f"【{y}年 第{q}四半期】\n"
                 else:
@@ -274,7 +274,7 @@ B. 外交的解決（他国への強硬手段）:
             for i, turn_news in enumerate(past_news):
                 t = world_state.turn - len(past_news) + i
                 if t > 0:
-                    y = 2024 + (t - 1) // 4
+                    y = 2025 + (t - 1) // 4
                     q = ((t - 1) % 4) + 1
                     news_context += f"〔{y}年 第{q}四半期〕\n"
                 else:
