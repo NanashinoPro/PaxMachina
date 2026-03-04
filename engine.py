@@ -275,15 +275,10 @@ class WorldEngine:
             country.approval_rating = max(0.0, country.approval_rating - approval_penalty)
             self.sys_logs_this_turn.append(f"[{country.name} 災害被害] -{damage_amount:.1f} (支持率 -{approval_penalty:.1f}%)")
 
-        # 債務対GDP比ペナルティ (インフレ・信認低下)
+        # 債務対GDP比の計算（記録用。直接GDPを削るペナルティは二重計上防止のため廃止。利払いで表現済み）
         debt_to_gdp = country.national_debt / max(1.0, old_gdp)
-        if debt_to_gdp > DEBT_TO_GDP_PENALTY_THRESHOLD:
-            # 100%超過分につき経済にデバフがかかる
-            excess = debt_to_gdp - DEBT_TO_GDP_PENALTY_THRESHOLD
-            penalty = 1.0 - min(0.05, excess * 0.02) # 最大5%のGDP押し下げ
-            new_gdp_provisional *= penalty
-            if self.state.turn % 5 == 0:
-                 self.sys_logs_this_turn.append(f"[{country.name} 債務超過] 対GDP比{debt_to_gdp:.1%}により経済成長減退")
+        if debt_to_gdp > DEBT_TO_GDP_PENALTY_THRESHOLD and self.state.turn % 5 == 0:
+            self.sys_logs_this_turn.append(f"[{country.name} 債務警告] 対GDP比{debt_to_gdp:.1%}。利払い負担が増大しています")
         
         # 経済力がゼロ以下になるのを防ぐ
         country.economy = max(1.0, new_gdp_provisional)
@@ -511,31 +506,15 @@ class WorldEngine:
             if cb_nx < 0:
                 cb.national_debt += abs(cb_nx)
             
-            # 支持率に関するISモデルの二面性評価
-            # 赤字国: 物価が下がり消費者余剰が発生("安くて便利")する一方、産業空洞化ペナルティが早く蓄積
-            # 黒字国: 失業は減るが、物価上昇や過労によるペナルティ(マイルド)
+            # 支持率の基礎ボーナス（貿易による相互利益）
+            ca_support = 0.5
+            cb_support = 0.5
             if deficit_transfer > 0:
-                # Bが赤字
-                cb_support = 1.0  # 安い輸入品の恩恵
-                ca_support = 0.5  # 輸出産業の好調
-                cb.trade_deficit_counter += 1
-                ca.trade_deficit_counter = max(0, ca.trade_deficit_counter - 1)
-                
-                if cb.trade_deficit_counter > 3:
-                    penalty = min(5.0, (cb.trade_deficit_counter - 3) * 1.5) # ペナルティ上限を5%に
-                    cb_support -= penalty
-                    self.sys_logs_this_turn.append(f"[Trade Penalty] {trade.country_b} は不均衡な貿易赤字による国内産業の空洞化・失業増(-{penalty:.1f})に苦しんでいます")
+                # Bが赤字（安い輸入品の恩恵）
+                cb_support = 1.0
             else:
                 # Aが赤字
                 ca_support = 1.0
-                cb_support = 0.5
-                ca.trade_deficit_counter += 1
-                cb.trade_deficit_counter = max(0, cb.trade_deficit_counter - 1)
-                
-                if ca.trade_deficit_counter > 3:
-                    penalty = min(5.0, (ca.trade_deficit_counter - 3) * 1.5) # ペナルティ上限を5%に
-                    ca_support -= penalty
-                    self.sys_logs_this_turn.append(f"[Trade Penalty] {trade.country_a} は不均衡な貿易赤字による国内産業の空洞化・失業増(-{penalty:.1f})に苦しんでいます")
                 
             if trade.country_a in self.turn_domestic_factors:
                 self.turn_domestic_factors[trade.country_a]["trade_support_bonus"] += ca_support
@@ -548,6 +527,21 @@ class WorldEngine:
                 f"{trade.country_a} ({ca_nx:+.1f} GDP_NX, Debt {ca.national_debt:.1f}, {ca_support:+.1f}% Support), "
                 f"{trade.country_b} ({cb_nx:+.1f} GDP_NX, Debt {cb.national_debt:.1f}, {cb_support:+.1f}% Support)"
             )
+            
+        # 各国の総貿易収支(NX)による支持率ペナルティ評価
+        for c_name, country in self.state.countries.items():
+            if country.last_turn_nx < 0:
+                # 国全体で赤字
+                country.trade_deficit_counter += 1
+                if country.trade_deficit_counter > 3:
+                    # ペナルティ上限を3%に緩和
+                    penalty = min(3.0, (country.trade_deficit_counter - 3) * 1.0)
+                    if c_name in self.turn_domestic_factors:
+                        self.turn_domestic_factors[c_name]["trade_support_bonus"] -= penalty
+                    self.sys_logs_this_turn.append(f"[Trade Penalty] {c_name} は全体的な貿易赤字による国内産業空洞化で支持率低下(-{penalty:.1f}%)")
+            else:
+                # 単年度黒字ならカウンターを減少（またはリセット）
+                country.trade_deficit_counter = max(0, country.trade_deficit_counter - 1)
             
         # Sanctions (Damage Model)
         for sanction in self.state.active_sanctions:
@@ -855,15 +849,15 @@ class WorldEngine:
     def _handle_election(self, name: str, country: CountryState):
         self.log_event(f"🗳️ {name}で【大統領選挙】が実施されました。")
         
-        # 落選確率は支持率の反比例 (例: 支持40%なら60%で落選)
-        lose_chance = max(0.0, 100.0 - country.approval_rating) / 100.0
+        # 1〜100の乱数を生成し、支持率以下なら再選
+        roll = random.uniform(0.0, 100.0)
         
-        if random.random() < lose_chance:
-            self.log_event(f"🔄 【政権交代】{name}の現職が選挙で敗北しました！国家の政策方針が大きく見直されます。")
+        if roll <= country.approval_rating:
+            self.log_event(f"✅ {name}の現職が再選を果たしました。現状の政策が継続されます。(Roll: {roll:.1f} <= 支持率: {country.approval_rating:.1f}%)")
+        else:
+            self.log_event(f"🔄 【政権交代】{name}の現職が選挙で敗北しました！国家の政策方針が大きく見直されます。(Roll: {roll:.1f} > 支持率: {country.approval_rating:.1f}%)")
             country.approval_rating = max(0.0, min(100.0, 100.0 - country.approval_rating)) # 新政権へのご祝儀相場（支持率を反転）
             self.pending_elections.append(name)
-        else:
-            self.log_event(f"✅ {name}の現職が再選を果たしました。現状の政策が継続されます。")
 
     def _handle_rebellion(self, name: str, country: CountryState):
         self.log_event(f"🔥 【革命/クーデター発生】{name}で大規模な武装蜂起が発生し、政府が転覆しました！")

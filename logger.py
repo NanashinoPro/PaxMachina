@@ -79,6 +79,7 @@ class SimulationLogger:
         table.add_column("体制", style="magenta")
         table.add_column("経済力", justify="right", style="green")
         table.add_column("軍事力", justify="right", style="red")
+        table.add_column("諜報力", justify="right", style="blue")
         table.add_column("支持率", justify="right", style="yellow")
         table.add_column("イデオロギー/状態", style="white")
 
@@ -102,6 +103,7 @@ class SimulationLogger:
                 "🗳️ 民主" if c.government_type == "democracy" else "👑 専制",
                 f"{c.economy:.1f}",
                 f"{c.military:.1f}",
+                f"{c.intelligence_level:.1f}",
                 f"{c.approval_rating:.1f}%",
                 ideology_text
             )

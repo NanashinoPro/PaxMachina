@@ -64,13 +64,12 @@ def main():
     
     # --- 再現性のための乱数シード設定 ---
     if args.seed is not None:
-        random.seed(args.seed)
-        print(f"🔒 乱数シード固定: {args.seed}")
+        current_seed = args.seed
+        print(f"🔒 乱数シード固定: {current_seed}")
     else:
-        seed = random.randint(0, 2**32 - 1)
-        random.seed(seed)
-        print(f"🔒 乱数シード（自動生成）: {seed}")
-    
+        current_seed = random.randint(0, 2**32 - 1)
+        print(f"🔒 乱数シード（自動生成）: {current_seed}")
+    random.seed(current_seed)
     if args.resume:
         if not os.path.exists(args.resume):
             print(f"エラー: 指定されたログファイルが見つかりません: {args.resume}")
@@ -93,13 +92,13 @@ def main():
             session_id = None
             
         logger = SimulationLogger(session_id=session_id)
-        logger.sys_log(f"[Reproducibility] 乱数シード: {args.seed if args.seed is not None else 'auto'}")
+        logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
         print(f"--- 🌍 AI外交シミュレーション (Turn {world_state.turn} から再開) ---")
     else:
         # システム初期化
         world_state = initialize_world()
         logger = SimulationLogger()
-        logger.sys_log(f"[Reproducibility] 乱数シード: {args.seed if args.seed is not None else 'auto'}")
+        logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
         print("--- 🌍 AI外交シミュレーション ---")
 
     try:
