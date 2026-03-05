@@ -79,6 +79,7 @@ class SimulationLogger:
         table.add_column("体制", style="magenta")
         table.add_column("経済力", justify="right", style="green")
         table.add_column("軍事力", justify="right", style="red")
+        table.add_column("教育・科学", justify="right", style="purple")
         table.add_column("諜報力", justify="right", style="blue")
         table.add_column("支持率", justify="right", style="yellow")
         table.add_column("イデオロギー/状態", style="white")
@@ -103,6 +104,7 @@ class SimulationLogger:
                 "🗳️ 民主" if c.government_type == "democracy" else "👑 専制",
                 f"{c.economy:.1f}",
                 f"{c.military:.1f}",
+                f"{c.education_level:.1f}",
                 f"{c.intelligence_level:.1f}",
                 f"{c.approval_rating:.1f}%",
                 ideology_text
@@ -123,7 +125,25 @@ class SimulationLogger:
         new_tax_rate = action.domestic_policy.tax_rate
         if new_tax_rate >= 1.0:
             new_tax_rate /= 100.0
-        text.append(f"税率 {new_tax_rate:.1%} | 経済 {dpol.invest_economy:.0%} | 軍事 {dpol.invest_military:.0%} | 福祉 {dpol.invest_welfare:.0%} | 諜報 {dpol.invest_intelligence:.0%}")
+        text.append(f"税率 {new_tax_rate:.1%} | 経済 {dpol.invest_economy:.0%} | 軍事 {dpol.invest_military:.0%} | 福祉 {dpol.invest_welfare:.0%} | 教育・科学 {dpol.invest_education_science:.0%} | 諜報 {dpol.invest_intelligence:.0%}\n")
+        text.append(f"内政理由: ", style="bold yellow")
+        text.append(f"{dpol.reason}\n")
+        
+        if action.diplomatic_policies:
+            text.append(f"外交: ", style="bold blue")
+            for dip in action.diplomatic_policies:
+                text.append(f"\n  → {dip.target_country}: {dip.reason}")
+            text.append("\n")
+
+        if action.update_hidden_plans:
+            text.append(f"秘匿計画: ", style="bold red")
+            text.append(f"{action.update_hidden_plans}\n")
+            
+        if action.sns_posts:
+            text.append(f"SNS投稿: ", style="bold cyan")
+            for post in action.sns_posts:
+                text.append(f"\n  \"{post}\"")
+            text.append("\n")
         
         self.console.print(Panel(text, title=f"🧠 {country_name} 首脳の脳内", border_style="magenta"))
 

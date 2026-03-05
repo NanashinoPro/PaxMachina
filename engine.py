@@ -47,8 +47,8 @@ INTEL_MAINTENANCE_ALPHA = 0.05     # 諜報網の自然減衰率
 
 # --- 教育・科学システム定数（内生的成長理論）---
 EDUCATION_GROWTH_RATE = 0.05       # 教育投資の成長率（人的資本の蓄積速度。絶対額スケール調整済み）
-EDUCATION_MAINTENANCE_ALPHA = 0.01 # 人的資本の自然減衰率（1%/四半期。知識の陳腐化等）
-EDUCATION_GDP_ALPHA = 0.01         # 人的資本の産出弾力性（alpha）
+EDUCATION_MAINTENANCE_ALPHA = 0.025 # 人的資本の自然減衰率（1%/四半期。知識の陳腐化等）
+EDUCATION_GDP_ALPHA = 0.1         # 人的資本の産出弾力性（alpha）
 
 # --- 政治・実行力モデル定数 ---
 DEMOCRACY_MIN_EXECUTION_POWER = 0.4 # 民主主義における政策実行力の最低保証値（官僚機構による基本執行分）

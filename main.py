@@ -10,48 +10,51 @@ import summarizer
 import notifier
 
 def initialize_world() -> WorldState:
-    """初期の歴史的状況を設定したWorldStateを返す"""
+    """初期の歴史的状況をCSV(initial_stats.csv)から読み込んでWorldStateを返す"""
+    import csv
+    countries = {}
+    csv_path = os.path.join(os.path.dirname(__file__), "initial_stats.csv")
+    
+    with open(csv_path, "r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = row["name"]
+            government_type = GovernmentType(row["government_type"])
+            
+            # 数値型への変換
+            countries[name] = CountryState(
+                name=name,
+                government_type=government_type,
+                ideology=row["ideology"],
+                economy=float(row["economy"]),
+                military=float(row["military"]),
+                intelligence_level=float(row["intelligence_level"]),
+                area=float(row["area"]),
+                approval_rating=float(row["approval_rating"]),
+                turns_until_election=int(row["turns_until_election"]) if row["turns_until_election"] else None,
+                rebellion_risk=float(row["rebellion_risk"]) if row["rebellion_risk"] else 0.0,
+                press_freedom=float(row["press_freedom"]),
+                education_level=float(row["education_level"]),
+                hidden_plans=""
+            )
+
+    # 関係性の初期化（全組み合わせを中立に）
+    relations = {}
+    country_names = list(countries.keys())
+    for i, name_a in enumerate(country_names):
+        relations[name_a] = {}
+        for j, name_b in enumerate(country_names):
+            if i != j:
+                relations[name_a][name_b] = RelationType.NEUTRAL
+
     world = WorldState(
         turn=1,
         year=2025,
         quarter=1,
-        countries={
-            "アメリカ": CountryState(
-                name="アメリカ",
-                government_type=GovernmentType.DEMOCRACY,
-                ideology="自由民主主義体制の維持、同盟国との連携による覇権維持、経済的優位の確保",
-                economy=25000.0,
-                military=850.0,
-                intelligence_level=100.0, # NCPI (National Cyber Power Index) 準拠
-                area=9833517.0,
-                approval_rating=55.0,
-                turns_until_election=16, 
-                rebellion_risk=0.0,
-                press_freedom=0.6549, 
-                education_level=940.0, # R&D支出額（10億ドル単位）を初期ストックとして採用
-                hidden_plans=""
-            ),
-            "中国": CountryState(
-                name="中国",
-                government_type=GovernmentType.AUTHORITARIAN,
-                ideology="国家主導による急速な経済・軍事の発展、既存の世界秩序の変更と覇権の奪取",
-                economy=18000.0,
-                military=306.0,
-                intelligence_level=90.0, # NCPI (National Cyber Power Index) 準拠
-                area=9596960.0,
-                approval_rating=70.0,
-                rebellion_risk=5.0,
-                press_freedom=0.2241, 
-                education_level=460.0, # R&D支出額（10億ドル単位）を初期ストックとして採用
-                hidden_plans=""
-            )
-        },
-        relations={
-            "アメリカ": {"中国": RelationType.NEUTRAL},
-            "中国": {"アメリカ": RelationType.NEUTRAL}
-        },
+        countries=countries,
+        relations=relations,
         active_wars=[],
-        active_trades=[TradeState(country_a="アメリカ", country_b="中国")],
+        active_trades=[TradeState(country_a="アメリカ", country_b="中国")], # 貿易は一旦固定
         news_events=["世界のリーダーたちが行動を開始しています。"]
     )
     return world

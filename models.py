@@ -59,6 +59,7 @@ class DomesticAction(BaseModel):
     invest_welfare: float = Field(..., description="治安・福祉維持（支持率維持）への投資割合（0.0-1.0）")
     invest_intelligence: float = Field(0.0, description="諜報・技術開発への投資割合（0.0-1.0。諜報レベルを蓄積し、諜報活動の成功率を向上させる）")
     invest_education_science: float = Field(0.0, description="教育・科学技術への投資割合（0.0-1.0）。人的資本を蓄積し、長期的な経済成長バフを生み出す")
+    reason: str = Field(..., max_length=50, description="この内政決定の簡潔な理由（30文字以内厳守）")
 
 class DiplomaticAction(BaseModel):
     """特定のターゲット国へ向けた外交・軍事・諜報アクション"""
@@ -84,6 +85,7 @@ class DiplomaticAction(BaseModel):
     propose_summit: bool = Field(False, description="対象国との首脳会談を提案するか")
     accept_summit: bool = Field(False, description="前のターンに相手から提案された首脳会談を受諾するか")
     summit_topic: Optional[str] = Field(None, description="首脳会談で議論したい議題（提案または受諾時のみ記載）")
+    reason: str = Field(..., max_length=50, description="この外交決定の簡潔な理由（30文字以内厳守）")
 
 class AgentAction(BaseModel):
     """各ターンごとにAIエージェントが出力する行動全体の構造"""
