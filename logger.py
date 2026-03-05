@@ -119,7 +119,7 @@ class SimulationLogger:
         
         text.append(f"内政: ", style="bold green")
         dpol = action.domestic_policy
-        text.append(f"経済 {dpol.invest_economy:.0%} | 軍事 {dpol.invest_military:.0%} | 福祉 {dpol.invest_welfare:.0%} | 諜報 {dpol.invest_intelligence:.0%}")
+        text.append(f"税率 {dpol.tax_rate:.1%} | 経済 {dpol.invest_economy:.0%} | 軍事 {dpol.invest_military:.0%} | 福祉 {dpol.invest_welfare:.0%} | 諜報 {dpol.invest_intelligence:.0%}")
         
         self.console.print(Panel(text, title=f"🧠 {country_name} 首脳の脳内", border_style="magenta"))
 

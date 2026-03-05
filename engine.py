@@ -39,9 +39,13 @@ TRADE_GRAVITY_FRICTION_NEUTRAL = 2.0
 # 戦争モデルの定数
 DEFENDER_ADVANTAGE_MULTIPLIER = 1.2
 
-# 諜報モデルの定数
+# --- 諜報システム定数 ---
 INTEL_GROWTH_RATE = 0.02           # 諜報投資の成長率（軍事と同スケール）
-INTEL_MAINTENANCE_ALPHA = 0.05     # 諜報技術の陳腐化率（毎ターン5%減衰）
+INTEL_MAINTENANCE_ALPHA = 0.05     # 諜報網の自然減衰率
+
+# --- 政治・実行力モデル定数 ---
+DEMOCRACY_MIN_EXECUTION_POWER = 0.4 # 民主主義における政策実行力の最低保証値（官僚機構による基本執行分）
+
 # ------------------------------------
 
 class WorldEngine:
@@ -99,18 +103,57 @@ class WorldEngine:
         # 4. 戦争状態の処理
         self._process_wars()
         
-        # 5. 内政イベント（選挙・反乱）の判定
-        self._process_domestic_events()
-        
-        # 6. ランダムイベント（災害・技術革新）の判定
+        # 5. ランダムイベント（災害・技術革新）の判定
         self._process_random_events()
         
-        # 7. 時間進行とターン終了処理は外部 (main.py) から advance_time() を呼び出すよう変更
+        # 6. 時間進行とターン終了処理は外部 (main.py) から advance_time() を呼び出すよう変更
         
         # イベントログをステートに記録
-        self.state.news_events = self.events_this_turn.copy()
+        self.state.news_events.extend(self.events_this_turn.copy())
         
         return self.state
+
+    def process_pre_turn(self):
+        """
+        AIエージェントの意思決定前に、システムが自動で発生させるイベント（政権交代など）を処理する
+        """
+        self.events_this_turn = []
+        self.sys_logs_this_turn = []
+        self.pending_rebellions = []
+        self.pending_elections = []
+        
+        for name, country in self.state.countries.items():
+            # 支持率低下による反乱リスク
+            if country.approval_rating < 30.0:
+                country.rebellion_risk += 5.0
+                self.log_event(f"⚠️ {name}の国内で政府への抗議運動が激化しています。(支持率{country.approval_rating:.1f}%)")
+            else:
+                country.rebellion_risk = max(0.0, country.rebellion_risk - 2.0)
+                
+            # 체제別 イベント
+            if country.government_type == GovernmentType.DEMOCRACY:
+                # 支持率が0%に達した場合のみクーデター発生（ARCHITECTURE.md §2.6 準拠）
+                if country.approval_rating <= 0.0:
+                    self.log_event(f"⚠️ {name}で【政府機能麻痺】支持率が0%に達し、暴動により政権が崩壊しました！")
+                    self._handle_rebellion(name, country)
+                    if country.turns_until_election is not None:
+                        country.turns_until_election = 16 # 米国の場合4年(16ターン)リセット
+                    continue
+                    
+                if country.turns_until_election is not None:
+                    country.turns_until_election -= 1
+                    if country.turns_until_election <= 0:
+                        self._handle_election(name, country)
+                        country.turns_until_election = 16 # 米国の場合4年(16ターン)リセット
+                        
+            elif country.government_type == GovernmentType.AUTHORITARIAN:
+                # 専制主義での反乱判定
+                if country.rebellion_risk > random.uniform(20.0, 100.0):
+                    self._handle_rebellion(name, country)
+                    country.rebellion_risk = 0.0
+                    
+        # プレターンイベントでリストを上書き（前ターンのログをここでクリア）
+        self.state.news_events = self.events_this_turn.copy()
 
     def _process_domestic(self, country_name: str, action: AgentAction):
         country = self.state.countries[country_name]
@@ -124,6 +167,10 @@ class WorldEngine:
         new_tax_rate = action.domestic_policy.tax_rate
         
         # 税率の異常値を弾く (0.1 ~ 0.7 の範囲内にクランプ)
+        # 首脳AIが 15.0(%) のように整数で返してきた場合の補正ロジック
+        if new_tax_rate >= 1.0:
+            new_tax_rate /= 100.0
+            
         new_tax_rate = max(0.10, min(0.70, new_tax_rate))
     
         # 1ターンあたりの税率変動を±10%に制限（急激な増減税による社会崩壊の防止）
@@ -151,7 +198,7 @@ class WorldEngine:
         execution_power = 1.0
         if country.government_type == GovernmentType.DEMOCRACY:
             if country.approval_rating < DEMOCRACY_WARN_APPROVAL:
-                execution_power = max(0.0, (country.approval_rating - CRITICAL_APPROVAL) / (DEMOCRACY_WARN_APPROVAL - CRITICAL_APPROVAL))
+                execution_power = max(DEMOCRACY_MIN_EXECUTION_POWER, (country.approval_rating - CRITICAL_APPROVAL) / (DEMOCRACY_WARN_APPROVAL - CRITICAL_APPROVAL))
         elif country.government_type == GovernmentType.AUTHORITARIAN:
             if country.approval_rating < 25.0:
                 execution_power = max(0.5, 0.5 + (country.approval_rating / 50.0))
@@ -735,37 +782,7 @@ class WorldEngine:
         # 関連する戦争も終了させる
         self.state.active_wars = [w for w in self.state.active_wars if w.aggressor != loser_name and w.defender != loser_name]
 
-    def _process_domestic_events(self):
-        for name, country in self.state.countries.items():
-            
-            # 支持率低下による反乱リスク
-            if country.approval_rating < 30.0:
-                country.rebellion_risk += 5.0
-                self.log_event(f"⚠️ {name}の国内で政府への抗議運動が激化しています。(支持率{country.approval_rating:.1f}%)")
-            else:
-                country.rebellion_risk = max(0.0, country.rebellion_risk - 2.0)
-                
-            # 체제別 イベント
-            if country.government_type == GovernmentType.DEMOCRACY:
-                # 支持率が0%に達した場合のみクーデター発生（ARCHITECTURE.md §2.6 準拠）
-                if country.approval_rating <= 0.0:
-                    self.log_event(f"⚠️ {name}で【政府機能麻痺】支持率が0%に達し、暴動により政権が崩壊しました！")
-                    self._handle_rebellion(name, country)
-                    if country.turns_until_election is not None:
-                        country.turns_until_election = 16 # 米国の場合4年(16ターン)リセット
-                    continue
-                    
-                if country.turns_until_election is not None:
-                    country.turns_until_election -= 1
-                    if country.turns_until_election <= 0:
-                        self._handle_election(name, country)
-                        country.turns_until_election = 16 # 米国の場合4年(16ターン)リセット
-                        
-            elif country.government_type == GovernmentType.AUTHORITARIAN:
-                # 専制主義での反乱判定
-                if country.rebellion_risk > random.uniform(20.0, 100.0):
-                    self._handle_rebellion(name, country)
-                    country.rebellion_risk = 0.0
+
 
     from models import DisasterEvent
     def _process_random_events(self):

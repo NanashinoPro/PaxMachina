@@ -116,28 +116,59 @@ def main():
     past_news_queue = []
     
     for _ in range(MAX_TURNS):
-        # 1. 国家ステータス
+        # 1. ターン開始時のシステム内政判定（選挙・クーデター）
+        engine.process_pre_turn()
+        
+        # 2. 国家ステータス
         logger.display_turn_header(world_state)
         logger.display_section_header("1. 国家ステータス")
         logger.display_country_status(world_state)
         
-        # 2. ニュース・イベントログ (前期の結果)
+        # 3. ニュース・イベントログ (前期の結果 + 今期開始時の事象)
         logger.display_section_header("2. ニュース・イベントログ")
         logger.display_world_events(world_state)
         
-        # 3. 各AIエージェントによる行動の決定（API呼び出し）
+        # 4. イデオロギーの再作成（新政権の発足など）
+        affected_countries = set(getattr(engine, 'pending_rebellions', []) + getattr(engine, 'pending_elections', []))
+        if affected_countries or any(name == "中国" and world_state.turn % 20 == 0 for name in world_state.countries.keys()):
+            logger.display_section_header("2.5 イデオロギーの再作成")
+            ideology_updates = []
+            for country_name, country_state in world_state.countries.items():
+                is_china_periodic = (country_name == "中国" and world_state.turn % 20 == 0)
+                if country_name in affected_countries or is_china_periodic:
+                    try:
+                        if country_state.government_type == GovernmentType.DEMOCRACY:
+                            print(f"🗳️ {country_name}の新しいイデオロギー策定に向けて世論を調査中...")
+                            sns_posts = agent_system.generate_citizen_sns_posts(country_name, country_state, world_state, 5)
+                            new_ideology = agent_system.generate_ideology_democracy(country_name, country_state, world_state, sns_posts)
+                        else:
+                            new_ideology = agent_system.generate_ideology_authoritarian(country_name, country_state, world_state)
+                            
+                        country_state.ideology = new_ideology
+                        reason = "新政権" if country_name in affected_countries else "定期的な国家目標見直し"
+                        msg = f"🔄 {country_name}が{reason}により新たな国家目標を発表しました: 「{new_ideology[:50]}...」"
+                        world_state.news_events.append(msg)
+                        ideology_updates.append(msg)
+                        logger.sys_log(f"[{country_name}] 新しいイデオロギーを設定: {new_ideology}")
+                    except Exception as e:
+                        logger.sys_log(f"[{country_name}] イデオロギーの生成に失敗しました: {e}", "ERROR")
+            
+            if ideology_updates:
+                logger.display_category_events(ideology_updates, "イデオロギー再構築", style="bold blue", icon="🔄")
+        
+        # 5. 各AIエージェントによる行動の決定（API呼び出し）
         print("\n⏳ 首脳AIが状況を分析し、行動を決定しています...")
         actions = agent_system.generate_actions(world_state, past_news=past_news_queue)
         
-        # 3. 各国の意思決定
+        # 6. 各国の意思決定
         logger.display_section_header("3. 各国の意思決定")
         for country_name, action in actions.items():
             logger.display_agent_thoughts(country_name, action)
 
-        # エンジンによる世界の更新（判定フェーズ）
+        # 7. エンジンによる世界の更新（判定フェーズ）
         world_state = engine.process_turn(actions)
         
-        # 4 & 5. 災害・技術革新、経済制裁などの抽出
+        # 8 & 9. 災害・技術革新、経済制裁などの抽出
         disaster_tech_events = [e for e in world_state.news_events if any(k in e for k in ["💡", "🚨", "技術"])]
         sanctions_trade_events = [e for e in world_state.news_events if any(k in e for k in ["⛔", "✅", "🚢", "🤝", "貿易", "制裁"])]
         
@@ -158,34 +189,7 @@ def main():
             logger.sys_log(log_msg)
         engine.sys_logs_this_turn.clear()
         
-        # 6. イデオロギーの再作成
-        logger.display_section_header("6. イデオロギーの再作成")
-        affected_countries = set(getattr(engine, 'pending_rebellions', []) + getattr(engine, 'pending_elections', []))
-        ideology_updates = []
-        for country_name, country_state in world_state.countries.items():
-            is_china_periodic = (country_name == "中国" and world_state.turn % 20 == 0)
-            if country_name in affected_countries or is_china_periodic:
-                try:
-                    if country_state.government_type == GovernmentType.DEMOCRACY:
-                        print(f"🗳️ {country_name}の新しいイデオロギー策定に向けて世論を調査中...")
-                        sns_posts = agent_system.generate_citizen_sns_posts(country_name, country_state, world_state, 5)
-                        new_ideology = agent_system.generate_ideology_democracy(country_name, country_state, world_state, sns_posts)
-                    else:
-                        new_ideology = agent_system.generate_ideology_authoritarian(country_name, country_state, world_state)
-                        
-                    country_state.ideology = new_ideology
-                    reason = "新政権" if country_name in affected_countries else "定期的な国家目標見直し"
-                    msg = f"🔄 {country_name}が{reason}により新たな国家目標を発表しました: 「{new_ideology[:50]}...」"
-                    world_state.news_events.append(msg)
-                    ideology_updates.append(msg)
-                    logger.sys_log(f"[{country_name}] 新しいイデオロギーを設定: {new_ideology}")
-                except Exception as e:
-                    logger.sys_log(f"[{country_name}] イデオロギーの生成に失敗しました: {e}", "ERROR")
-        
-        if ideology_updates:
-            logger.display_category_events(ideology_updates, "イデオロギー再構築", style="bold blue", icon="🔄")
-        else:
-            print("国家目標の大きな変更はありません。")
+        # （イデオロギー再作成はループの前半に移動済み）
 
         # 7. 諜報機関のレポート作成
         logger.display_section_header("7. 諜報機関のレポート作成")
