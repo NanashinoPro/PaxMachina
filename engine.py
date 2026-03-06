@@ -815,8 +815,26 @@ class WorldEngine:
         # 敗戦国を世界から削除
         del self.state.countries[loser_name]
         
-        # 関連する戦争も終了させる
+        # 関連するデータのクリーンアップ
+        
+        # 1. 関連する戦争も終了させる
         self.state.active_wars = [w for w in self.state.active_wars if w.aggressor != loser_name and w.defender != loser_name]
+        
+        # 2. 貿易協定の破棄
+        self.state.active_trades = [t for t in self.state.active_trades if t.country_a != loser_name and t.country_b != loser_name]
+        
+        # 3. 経済制裁の解除
+        self.state.active_sanctions = [s for s in self.state.active_sanctions if s.imposer != loser_name and s.target != loser_name]
+        
+        # 4. 保留中の提案（会談・同盟）の削除
+        self.state.pending_summits = [s for s in self.state.pending_summits if s.proposer != loser_name and s.target != loser_name]
+        self.state.pending_alliances = [a for a in self.state.pending_alliances if a.proposer != loser_name and a.target != loser_name]
+        
+        # 5. 技術革新の原産国が敗北した場合（必要に応じて）
+        for bt in self.state.active_breakthroughs:
+            if bt.origin_country == loser_name:
+                # 原産国が滅んでも技術自体は普及し続ける可能性があるが、ここでは伝播を維持し、原産国の表示のみ考慮
+                pass
 
 
 

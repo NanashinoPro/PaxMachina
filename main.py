@@ -245,6 +245,9 @@ def main():
                 ca = world_state.countries.get(proposal.proposer)
                 cb = world_state.countries.get(proposal.target)
                 if ca and cb:
+                    # 国家がまだ存在しているか再確認 (engine.process_turnで敗北した可能性)
+                    if proposal.proposer not in world_state.countries or proposal.target not in world_state.countries:
+                        continue
                     summit_news_result, full_summit_log = agent_system.run_summit(proposal, ca, cb, world_state, past_news=past_news_queue)
                     world_state.news_events.append(summit_news_result)
                     recent_summit_logs.append(full_summit_log)
@@ -272,6 +275,8 @@ def main():
         
         # 首脳の投稿
         for country, action in actions.items():
+            if country not in world_state.countries:
+                continue # 敗北国はSNSを投稿しない
             if hasattr(action, 'sns_posts') and action.sns_posts:
                 for post in action.sns_posts:
                     if post.strip():
@@ -293,6 +298,8 @@ def main():
                     
         # 一般国民
         for country, state in world_state.countries.items():
+            if country not in sns_timelines:
+                continue
             current_posts = len(sns_timelines[country])
             needed = 5 - current_posts
             if needed > 0:
@@ -309,8 +316,9 @@ def main():
             logger.sys_log(log_msg)
         engine.sys_logs_this_turn.clear()
 
-        # ログの保存
-        logger.save_turn_log(world_state, actions)
+        # ログの保存 (敗北国のアクションを除去した上で保存)
+        safe_actions = {c: a for c, a in actions.items() if c in world_state.countries}
+        logger.save_turn_log(world_state, safe_actions)
         
         # 10. ターン履歴の保存と時間進行
         past_news_queue.append(world_state.news_events.copy())
