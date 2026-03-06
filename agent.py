@@ -144,6 +144,18 @@ class AgentSystem:
         
         my_info += f"あなたの脳内（非公開の計画など）には次のような情報があります: '{country_state.hidden_plans}'\n\n"
         
+        # 貿易情報の付与
+        active_trades = world_state.active_trades if hasattr(world_state, 'active_trades') else []
+        my_trades = []
+        for t in active_trades:
+            if t.country_a == country_name:
+                my_trades.append(t.country_b)
+            elif t.country_b == country_name:
+                my_trades.append(t.country_a)
+        
+        if my_trades:
+            my_info += f"---締結中の貿易協定---\n貿易相手国: {', '.join(my_trades)} (相互に経済効率化ボーナスが発生し、経済構造の差に応じて貿易収支が発生します)\n\n"
+
         # 制裁情報の付与
         active_sanctions = world_state.active_sanctions if hasattr(world_state, 'active_sanctions') else []
         my_sanctions = [s for s in active_sanctions if s.imposer == country_name]
