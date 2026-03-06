@@ -560,9 +560,18 @@ class WorldEngine:
             nx_ratio_b = nx_b / max(1.0, cb.economy)
             diff_ratio = nx_ratio_a - nx_ratio_b
             
-            # 取引量の一部が赤字比率の高い国から低い国（または黒字比率の高い国）へ移転
-            # diff_ratioが正ならAの方が「貯蓄超過（輸出余力）」があり、Bが「投資超過（輸入需要）」がある
-            deficit_transfer = diff_ratio * base_volume * 15.0 # 比率ベースのため係数を調整 (1.5 -> 15.0)
+            # 【学術的適正化】係数を15.0から0.5へ大幅に下方修正。
+            # 貯蓄・投資バランスの差が二国間不均衡に与える影響度（弾力性）を現実的な範囲に収める。
+            raw_transfer = diff_ratio * base_volume * 0.5
+            
+            # 物理的限界のガードレール: 赤字転移額は二国間の貿易総量(base_volume)を超えない
+            transfer_capped_by_volume = max(-base_volume, min(base_volume, raw_transfer))
+            
+            # マクロ経済的ガードレール (サドン・ストップ防止): 1ターンの流出は相手国/自国のGDPの3%を上限とする
+            # (IMF等の5%ルールに基づき、四半期ベースで3%＝年率約12%を「歴史的最大級のショック」として設定)
+            limit_a = ca.economy * 0.03
+            limit_b = cb.economy * 0.03
+            deficit_transfer = max(-limit_a, min(limit_b, transfer_capped_by_volume))
             
             mutual_bonus = base_volume * 0.005 # 貿易による共通の経済効率化ボーナス
             
