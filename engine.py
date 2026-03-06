@@ -555,11 +555,14 @@ class WorldEngine:
             nx_a = macro_balances[trade.country_a]
             nx_b = macro_balances[trade.country_b]
             
-            # 二国間の収支差分。nx_theoreticalが大きい(黒字体質)の方が、二国間でも黒字になると仮定
-            diff = nx_a - nx_b
-            # 取引量の一部が赤字国から黒字国へ国富として移転
-            # (diffが正ならAが黒字[輸出超過]、Bが赤字[輸入超過])
-            deficit_transfer = (diff / max(1.0, ca.economy + cb.economy)) * base_volume * 1.5
+            # 【SNA基準への改修】絶対額の差分ではなく、GDPに対する収支比率の差分を用いる（スケール・バイアスの解消）
+            nx_ratio_a = nx_a / max(1.0, ca.economy)
+            nx_ratio_b = nx_b / max(1.0, cb.economy)
+            diff_ratio = nx_ratio_a - nx_ratio_b
+            
+            # 取引量の一部が赤字比率の高い国から低い国（または黒字比率の高い国）へ移転
+            # diff_ratioが正ならAの方が「貯蓄超過（輸出余力）」があり、Bが「投資超過（輸入需要）」がある
+            deficit_transfer = diff_ratio * base_volume * 15.0 # 比率ベースのため係数を調整 (1.5 -> 15.0)
             
             mutual_bonus = base_volume * 0.005 # 貿易による共通の経済効率化ボーナス
             
@@ -594,7 +597,7 @@ class WorldEngine:
                 
             self.sys_logs_this_turn.append(
                 f"[Trade IS Balance] {trade.country_a} vs {trade.country_b} | "
-                f"Volume:{base_volume:.1f}, IS Diff(A-B):{diff:+.0f} -> "
+                f"Volume:{base_volume:.1f}, NX_Ratio Diff(A-B):{diff_ratio:+.2%} -> "
                 f"{trade.country_a} ({ca_nx:+.1f} GDP_NX, Debt {ca.national_debt:.1f}, {ca_support:+.1f}% Support), "
                 f"{trade.country_b} ({cb_nx:+.1f} GDP_NX, Debt {cb.national_debt:.1f}, {cb_support:+.1f}% Support)"
             )
