@@ -49,6 +49,10 @@ class CountryState(BaseModel):
     hidden_plans: str = Field("", description="AI自身が記録する秘密の目標や計画")
     leaked_intel: List[str] = Field(default_factory=list, description="過去に他国に漏洩した自国の機密情報の履歴（自国は気づいていない体で管理）")
     stat_history: List[Dict[str, float]] = Field(default_factory=list, description="過去のステータス履歴（直近4ターン分程度保持）")
+    
+    # 対外援助・属国化関連
+    dependency_ratio: Dict[str, float] = Field(default_factory=dict, description="他国に対する経済的依存度（0.0-1.0）。60%を超えると属国化する")
+    suzerain: Optional[str] = Field(None, description="属国化した場合の宗主国の国名（独自外交権を喪失する）")
 
 # ---------------------------------------------------------
 # アクション定義（AIが出力するJSON構造）
@@ -90,6 +94,11 @@ class DiplomaticAction(BaseModel):
     propose_summit: bool = Field(False, description="対象国との首脳会談を提案するか")
     accept_summit: bool = Field(False, description="前のターンに相手から提案された首脳会談を受諾するか")
     summit_topic: Optional[str] = Field(None, description="首脳会談で議論したい議題（提案または受諾時のみ記載）")
+    
+    # 対外援助 (Foreign Aid)
+    aid_amount_economy: float = Field(0.0, ge=0.0, description="対象国に対する民生・インフラへの経済支援額（自国の政府予算から拠出）")
+    aid_amount_military: float = Field(0.0, ge=0.0, description="対象国に対する兵器・軍事物資の軍事支援額（自国の政府予算から拠出）")
+    
     reason: str = Field(..., max_length=50, description="この外交決定の簡潔な理由（30文字以内厳守）")
 
 class AgentAction(BaseModel):

@@ -107,12 +107,38 @@ class WorldEngine:
         self.pending_elections = []
         self.turn_domestic_factors = {}
         self.turn_sns_logs = {} # Reset SNS logs for the current turn
+        self.turn_dutch_disease_penalty = {} # オランダ病（援助過剰）による政策実行力デバフ
+        
+        # 0. 基礎予算の算出と属国化による外交権のオーバーライド
+        for country_name, country in self.state.countries.items():
+            old_gdp = country.economy
+            interest_payment = country.national_debt * DEBT_INTEREST_RATE
+            tax_revenue = old_gdp * country.tax_rate
+            country.government_budget = max(0.0, tax_revenue - interest_payment)
+            
+            # 属国化のデバフ（自然減衰）と外交オーバーライド
+            if country.suzerain and country.suzerain not in self.state.countries:
+                country.suzerain = None # 宗主国が滅亡した場合は独立
+                
+            decayed_deps = {}
+            for k, v in country.dependency_ratio.items():
+                if k in self.state.countries:
+                    decayed_val = max(0.0, v - 0.05)
+                    if decayed_val > 0:
+                        decayed_deps[k] = decayed_val
+            country.dependency_ratio = decayed_deps
+            
+            # 属国の場合、独自の外交アクションを無効化（あるいは宗主国にひたすら協力する内容に書き換え可能だが、ここではシンプルに空にする）
+            if country.suzerain and country_name in actions:
+                actions[country_name].diplomatic_policies = []
+                self.sys_logs_this_turn.append(f"[{country_name} 属国] 宗主国 {country.suzerain} の意向により、独自の外交権が凍結されました。")
+
+        # 対外援助（オランダ病判定含む）の処理
+        self._process_foreign_aid(actions)
         
         # 1. 内政の反映
         for country_name, action in actions.items():
             self._process_domestic(country_name, action)
-            
-        # 2. 外交・諜報アクションの反映
         for country_name, action in actions.items():
             self._process_diplomacy_and_espionage(country_name, action)
             
@@ -181,6 +207,97 @@ class WorldEngine:
         # プレターンイベントでリストを上書き（前ターンのログをここでクリア）
         self.state.news_events = self.events_this_turn.copy()
 
+    def _process_foreign_aid(self, actions: Dict[str, AgentAction]):
+        """
+        対外援助の無償提供と、オランダ病（吸収能力限界）、および属国化の進行を処理する
+        """
+        received_aid_econ = {name: 0.0 for name in self.state.countries}
+        received_aid_mil = {name: 0.0 for name in self.state.countries}
+        
+        # 1. 援助の流出処理（自国の予算 G から天引き）
+        for donor_name, action in actions.items():
+            if donor_name not in self.state.countries:
+                continue
+            donor = self.state.countries[donor_name]
+            
+            for dip in action.diplomatic_policies:
+                target_name = dip.target_country
+                if target_name not in self.state.countries or target_name == donor_name:
+                    continue
+                
+                req_econ = getattr(dip, 'aid_amount_economy', 0.0)
+                req_mil = getattr(dip, 'aid_amount_military', 0.0)
+                
+                if req_econ <= 0 and req_mil <= 0:
+                    continue
+                
+                total_req = req_econ + req_mil
+                if total_req > donor.government_budget:
+                    # 予算上限のクランプ
+                    ratio = donor.government_budget / total_req
+                    req_econ *= ratio
+                    req_mil *= ratio
+                    total_req = donor.government_budget
+                
+                if total_req <= 0:
+                    continue
+                    
+                # 予算から天引き
+                donor.government_budget -= total_req
+                received_aid_econ[target_name] += req_econ
+                received_aid_mil[target_name] += req_mil
+                
+                # 依存度の加算
+                target = self.state.countries[target_name]
+                dependency_addition = total_req / max(1.0, target.economy)
+                target.dependency_ratio[donor_name] = target.dependency_ratio.get(donor_name, 0.0) + dependency_addition
+                
+                # ログ・ニュース
+                self.sys_logs_this_turn.append(f"[{donor_name} -> {target_name} 援助] 経済: {req_econ:.1f}, 軍事: {req_mil:.1f} (依存度 +{dependency_addition*100:.1f}%)")
+                self.log_event(f"💰 【対外援助】{donor_name}が{target_name}に対して莫大な援助（経済:{req_econ:.1f}, 軍事:{req_mil:.1f}）を実施しました。")
+
+        # 2. 援助の流入処理とオランダ病判定
+        for target_name, target in self.state.countries.items():
+            total_econ = received_aid_econ[target_name]
+            total_mil = received_aid_mil[target_name]
+            total_received = total_econ + total_mil
+            
+            if total_received <= 0:
+                continue
+                
+            # 吸収能力の限界（オランダ病判定）: 1ターンにGDPの20%以上を受け取ると発症
+            limit = target.economy * 0.20
+            
+            if total_received > limit:
+                # 限界超過！ 政策実行力が大暴落（最大で0.5倍になる）
+                excess_ratio = (total_received - limit) / target.economy
+                debuff = max(0.5, 1.0 - (excess_ratio * 2.0))
+                self.turn_dutch_disease_penalty[target_name] = debuff
+                
+                # 資金の消滅（モラルハザード: 超過分の50%が虚無に消える）
+                lost_amount = (total_received - limit) * 0.50
+                survival_ratio = (total_received - lost_amount) / total_received
+                
+                total_econ *= survival_ratio
+                total_mil *= survival_ratio
+                
+                self.sys_logs_this_turn.append(f"🚨 [{target_name} オランダ病発症] 莫大な援助により汚職とインフレが蔓延。政策実行力 x{debuff:.2f}。支援金 {lost_amount:.1f} が消散。")
+                self.log_event(f"⚠️ 【援助の呪い】{target_name}に自国の経済規模を上回る巨額の対外援助が流入した結果、急激なインフレと官僚の腐敗（オランダ病）が発生し、国家機能が麻痺しています！")
+                
+                # 支持率も暴落（強制徴用や物価高騰への反発）
+                target.approval_rating = max(0.0, target.approval_rating - 15.0)
+                
+            # 無事に残った資金を国家のパラメータに反映
+            target.economy += total_econ # 経済援助はGDPを直接ブースト
+            target.military += total_mil # 軍事力ストックに追加
+            
+            # 属国化の閾値判定
+            for donor_name, dep_ratio in target.dependency_ratio.items():
+                if dep_ratio > 0.60 and target.suzerain != donor_name:
+                    target.suzerain = donor_name
+                    self.log_event(f"👑 【属国化】{target_name}は{donor_name}からの巨額の経済・軍事支援により主権を喪失し、完全に{donor_name}の属国（傀儡国家）となりました。")
+                    self.sys_logs_this_turn.append(f"[{target_name} 属国化] {donor_name}への依存度が {dep_ratio*100:.1f}% に達し、主権喪失。")
+
     def _process_domestic(self, country_name: str, action: AgentAction):
         country = self.state.countries[country_name]
         
@@ -227,6 +344,11 @@ class WorldEngine:
         elif country.government_type == GovernmentType.AUTHORITARIAN:
             if country.approval_rating < 25.0:
                 execution_power = max(0.5, 0.5 + (country.approval_rating / 50.0))
+                
+        # オランダ病ペナルティの適用
+        if country_name in self.turn_dutch_disease_penalty:
+            penalty_ratio = self.turn_dutch_disease_penalty[country_name]
+            execution_power = max(0.1, execution_power * penalty_ratio)
         
         # --- マクロ経済モデリング (SNAベース: Y = C + I + G + NX) ---
         old_gdp = country.economy
@@ -254,11 +376,7 @@ class WorldEngine:
         # 自由度の数値を更新
         country.press_freedom = target_freedom
 
-        tax_revenue = old_gdp * country.tax_rate
-        
-        # 政府予算 (G全体のキャップ)
-        # 利払いを差し引いた実質予算 (マイナスにはならない)
-        country.government_budget = max(0.0, tax_revenue - interest_payment)
+        # 政府予算 (すでに対外援助等で引かれている額)
         budget = country.government_budget
         
         # 経済投資
@@ -302,6 +420,8 @@ class WorldEngine:
         # 基礎貯蓄率 (政治体制と福祉投資による低下)
         base_s_rate = AUTHORITARIAN_BASE_SAVING_RATE if country.government_type == GovernmentType.AUTHORITARIAN else DEMOCRACY_BASE_SAVING_RATE
         saving_rate = max(0.15, base_s_rate - (inv_wel * 0.15))
+
+        tax_revenue = old_gdp * country.tax_rate
 
         # 1. 民間消費 (C)
         # ケインズ型消費関数: C = (Y - T) * (1 - s)

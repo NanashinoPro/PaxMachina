@@ -92,6 +92,8 @@ class SimulationLogger:
                 ideology_text = ideology_text[:28] + "..."
                 
             status_extras = []
+            if getattr(c, 'suzerain', None):
+                status_extras.append(f"🛡️ {c.suzerain}の属国")
             if c.government_type == "democracy" and c.turns_until_election:
                 status_extras.append(f"選挙迄:{c.turns_until_election}T")
             if c.government_type == "authoritarian":
@@ -136,7 +138,12 @@ class SimulationLogger:
         if action.diplomatic_policies:
             text.append(f"外交: ", style="bold blue")
             for dip in action.diplomatic_policies:
-                text.append(f"\n  → {dip.target_country}: {dip.reason}")
+                aid_str = ""
+                aid_econ = getattr(dip, 'aid_amount_economy', 0.0)
+                aid_mil = getattr(dip, 'aid_amount_military', 0.0)
+                if aid_econ > 0 or aid_mil > 0:
+                    aid_str = f" [援助 経:{aid_econ:.1f}/軍:{aid_mil:.1f}]"
+                text.append(f"\n  → {dip.target_country}{aid_str}: {dip.reason}")
             text.append("\n")
 
         if action.update_hidden_plans:
