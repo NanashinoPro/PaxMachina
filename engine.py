@@ -1100,6 +1100,28 @@ class WorldEngine:
                 # ログはAgentが名前を生成した際に main.py 等で出力させる仕組みにするため、ここでは簡素にする。
                 self.sys_logs_this_turn.append(f"[{country_name}] 技術革新フラグが立ちました")
 
+    def _handle_election(self, country_name: str, country: CountryState):
+        """
+        民主主義国家の大統領選挙の論理を処理する
+        """
+        import random
+        roll = random.uniform(0.0, 100.0)
+        self.log_event(f"🗳️ {country_name}で国家元首の総選挙が実施されました。(現在の与党支持率: {country.approval_rating:.1f}%)")
+        
+        if roll <= country.approval_rating:
+            # 再選
+            self.log_event(f"✅ 【選挙結果】{country_name}の現政権が過半数の信任を得て再選を果たしました！")
+            self.sys_logs_this_turn.append(f"[{country_name} 選挙] 乱数 {roll:.1f} <= 支持率 {country.approval_rating:.1f} により再選")
+        else:
+            # 敗北（政権交代）
+            self.log_event(f"🔄 【政権交代】{country_name}の選挙で現政権が敗北し、新たな指導者が選出されました。")
+            self.sys_logs_this_turn.append(f"[{country_name} 選挙] 乱数 {roll:.1f} > 支持率 {country.approval_rating:.1f} により落選")
+            
+            # 敗北時の新政権の支持率は期待値として 100.0 - Approval にリセット（Option C準拠）
+            new_approval = max(0.0, min(100.0, 100.0 - country.approval_rating))
+            country.approval_rating = new_approval
+            self.sys_logs_this_turn.append(f"[{country_name} 新政権] 新たなハネムーン期間として支持率が {new_approval:.1f}% にリセットされました。")
+
     def _handle_rebellion(self, country_name: str, country: CountryState):
         """国家崩壊（クーデター・革命）の処理。Alesina-Spolaoreモデルに基づく分裂判定を含む"""
         
