@@ -100,13 +100,11 @@ def main():
             
         logger = SimulationLogger(session_id=session_id)
         logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
-        print(f"--- 🌍 AI外交シミュレーション (Turn {world_state.turn} から再開) ---")
     else:
         # システム初期化
         world_state = initialize_world()
         logger = SimulationLogger()
         logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
-        print("--- 🌍 AI外交シミュレーション ---")
 
     try:
         agent_system = AgentSystem(logger=logger)
@@ -117,6 +115,13 @@ def main():
 
     # S-2: AgentSystemのGemini感情分析器をエンジンに注入
     engine = WorldEngine(initial_state=world_state, analyzer=agent_system.sentiment_analyzer)
+
+    if args.resume:
+        # 復元されたstataは前ターンの終了時（時間進行前）のものなので、ここで時間を進めて次ターンを開始する
+        engine.advance_time()
+        print(f"--- 🌍 AI外交シミュレーション (Turn {world_state.turn} から再開) ---")
+    else:
+        print("--- 🌍 AI外交シミュレーション ---")
 
     # シミュレーションループ
     MAX_TURNS = args.turns
