@@ -1,9 +1,13 @@
+import uuid
 import math
 import random
-import numpy as np
-from scipy.stats import skewnorm
-from typing import Dict, List, Tuple
-from models import WorldState, CountryState, AgentAction, RelationType, GovernmentType, WarState, TradeState, SanctionState, SummitProposal, AllianceProposal
+import logging
+import json
+from enum import Enum
+from typing import Dict, List, Any
+
+# Local imports
+from models import WorldState, CountryState, GovernmentType, RelationType, AgentAction, WarState, TradeState, SanctionState, SummitProposal, AllianceProposal
 
 # --- 定数（プロトコルパラメータ）定義 ---
 DEMOCRACY_WARN_APPROVAL = 40.0
@@ -72,6 +76,7 @@ class WorldEngine:
         # 感情分析器（外部から注入）
         self.analyzer = analyzer
         self.turn_domestic_factors: Dict[str, Dict[str, float]] = {}
+        self.turn_sns_logs: Dict[str, List[Dict[str, Any]]] = {} # Added for fragmentation logic
 
         # 1ターン目のみ、各国の初期教育レベルを保存（規格化用）
         for name, country in self.state.countries.items():
@@ -100,6 +105,7 @@ class WorldEngine:
         self.pending_rebellions = []
         self.pending_elections = []
         self.turn_domestic_factors = {}
+        self.turn_sns_logs = {} # Reset SNS logs for the current turn
         
         # 1. 内政の反映
         for country_name, action in actions.items():
@@ -134,7 +140,9 @@ class WorldEngine:
         self.pending_rebellions = []
         self.pending_elections = []
         
-        for name, country in self.state.countries.items():
+        # 反乱と選挙の進行（Alesina-Spolaore分裂判定もここに含まれる）
+        # 分裂で新しい国が self.state.countries に追加されるため、list() でコピーして回す
+        for name, country in list(self.state.countries.items()):
             # 支持率低下による反乱リスク
             if country.approval_rating < 30.0:
                 country.rebellion_risk += 5.0
@@ -144,25 +152,30 @@ class WorldEngine:
                 
             # 체제別 イベント
             if country.government_type == GovernmentType.DEMOCRACY:
-                # 支持率が0%に達した場合のみクーデター発生（ARCHITECTURE.md §2.6 準拠）
-                if country.approval_rating <= 0.0:
-                    self.log_event(f"⚠️ {name}で【政府機能麻痺】支持率が0%に達し、暴動により政権が崩壊しました！")
-                    self._handle_rebellion(name, country)
-                    if country.turns_until_election is not None:
-                        country.turns_until_election = 16 # 米国の場合4年(16ターン)リセット
-                    continue
+                # 民主主義の動的クーデター確率 (Alesina-Spolaore統合)
+                if country.approval_rating <= 30.0:
+                    # 30%で0、0%で100%になるクーデター確率
+                    coup_prob = max(0.0, (30.0 - country.approval_rating) / 30.0 * 100.0)
+                    if random.uniform(0.0, 100.0) < coup_prob:
+                        self.log_event(f"⚠️ {name}で【政府機能麻痺】激しい暴動により民主政権が崩壊しました！(支持率{country.approval_rating:.1f}%)")
+                        self._handle_rebellion(name, country)
+                        if name in self.state.countries and self.state.countries[name].turns_until_election is not None:
+                            self.state.countries[name].turns_until_election = 16 # 米国の場合4年(16ターン)リセット
+                        continue
                     
                 if country.turns_until_election is not None:
                     country.turns_until_election -= 1
                     if country.turns_until_election <= 0:
                         self._handle_election(name, country)
-                        country.turns_until_election = 16 # 米国の場合4年(16ターン)リセット
+                        if name in self.state.countries:
+                            self.state.countries[name].turns_until_election = 16 # 米国の場合4年(16ターン)リセット
                         
             elif country.government_type == GovernmentType.AUTHORITARIAN:
                 # 専制主義での反乱判定
                 if country.rebellion_risk > random.uniform(20.0, 100.0):
                     self._handle_rebellion(name, country)
-                    country.rebellion_risk = 0.0
+                    if name in self.state.countries:
+                        self.state.countries[name].rebellion_risk = 0.0
                     
         # プレターンイベントでリストを上書き（前ターンのログをここでクリア）
         self.state.news_events = self.events_this_turn.copy()
@@ -192,7 +205,6 @@ class WorldEngine:
             new_tax_rate = clamped_tax_rate
         country.tax_rate = new_tax_rate
         
-        # 増減税による支持率・経済への影響
         tax_diff = new_tax_rate - old_tax_rate
         if tax_diff > 0:
             penalty = tax_diff * TAX_APPROVAL_PENALTY_MULTIPLIER
@@ -923,41 +935,83 @@ class WorldEngine:
                 # ログはAgentが名前を生成した際に main.py 等で出力させる仕組みにするため、ここでは簡素にする。
                 self.sys_logs_this_turn.append(f"[{country_name}] 技術革新フラグが立ちました")
 
-    def _handle_election(self, name: str, country: CountryState):
-        self.log_event(f"🗳️ {name}で【大統領選挙】が実施されました。")
+    def _handle_rebellion(self, country_name: str, country: CountryState):
+        """国家崩壊（クーデター・革命）の処理。Alesina-Spolaoreモデルに基づく分裂判定を含む"""
         
-        # 1〜100の乱数を生成し、支持率以下なら再選
-        roll = random.uniform(0.0, 100.0)
+        # --- 1. 分裂(Fragmentation)の判定 ---
         
-        if roll <= country.approval_rating:
-            self.log_event(f"✅ {name}の現職が再選を果たしました。現状の政策が継続されます。(Roll: {roll:.1f} <= 支持率: {country.approval_rating:.1f}%)")
-        else:
-            self.log_event(f"🔄 【政権交代】{name}の現職が選挙で敗北しました！国家の政策方針が大きく見直されます。(Roll: {roll:.1f} > 支持率: {country.approval_rating:.1f}%)")
-            country.approval_rating = max(0.0, min(100.0, 100.0 - country.approval_rating)) # 新政権へのご祝儀相場（支持率を反転）
-            self.pending_elections.append(name)
-
-    def _handle_rebellion(self, name: str, country: CountryState):
-        self.log_event(f"🔥 【革命/クーデター発生】{name}で大規模な武装蜂起が発生し、政府が転覆しました！")
+        # 基礎不安定性 (どれだけマイナスまで支持率が振り切れていたか等の不満度。0-100程度)
+        base_instability = max(0.0, 30.0 - country.approval_rating) + min(100.0, country.rebellion_risk)
         
-        # 確率で政治体制の選択
-        if random.random() < 0.5:
-            new_gov = GovernmentType.DEMOCRACY
-            gov_str = "民主的な"
-            country.turns_until_election = 16
-        else:
-            new_gov = GovernmentType.AUTHORITARIAN
-            gov_str = "強権的な"
-            country.turns_until_election = None
+        # 面積（国土規模）による多様性/異質性コスト（Alesina-Spolaore: サイズによる分裂圧力）
+        # ※ここでは面積の絶対値をベースに係数をかける（最大+30%程度）
+        size_factor = min(30.0, country.area * 0.05)
+        
+        # 自由貿易の恩恵（Alesina-Spolaore: 貿易網が発達しているほど小国が生き返りやすいため分裂圧力増）
+        # 対象国が結んでいる貿易協定の数をカウント
+        trade_count = sum(1 for t in self.state.active_trades if t.country_a == country_name or t.country_b == country_name)
+        trade_factor = trade_count * 5.0 # 1つにつき+5%
+        
+        # 分裂確率 P_frag
+        p_frag = min(100.0, (base_instability * 0.2) + size_factor + trade_factor)
+        
+        # 民主主義の場合は武力弾圧を行わないため相対的に分裂のハードルが低い(平和的独立)
+        if country.government_type == GovernmentType.DEMOCRACY:
+            p_frag += 10.0
+        else: # 専制主義は流血を辞さず抑え込むため分裂発生率はやや低い
+            p_frag -= 10.0
             
-        old_gov = country.government_type
-        country.government_type = new_gov
+        p_frag = max(0.0, min(100.0, p_frag))
         
-        self.log_event(f"🚩 【体制変化】クーデターの結果、{name}は{gov_str}新政権({new_gov.value})へと移行しました。")
+        is_fragmentation = random.uniform(0.0, 100.0) < p_frag
         
-        country.approval_rating = 70.0
-        country.economy *= 0.9   # 内戦による経済ダメージ（10%減）
-        country.military = country.economy * 0.1  # 軍事力をGDPの10%にリセット
+        if is_fragmentation:
+            self._execute_fragmentation(country_name, country, base_instability)
+            return
+
+        # --- 2. 通常のクーデター（政権交代のみ） ---
+        self.log_event(f"🔄 【政権交代】{country_name}にてクーデターが成功し、新政府が樹立されました！")
         
+        # 【Option C】クーデター後の経済の立て直し（基本GDPのリセット＝悪循環の底打ち）
+        # 旧政権の負債や非効率さをリセットし、新たなベースラインを設定する。
+        # クーデターまでの経済ダメージは維持するが、そこからの再出発を保障する。
+        # （ここではGDP自体を底上げするのではなく、経済成長ペナルティをリセットする意味合いで、
+        #   政府予算の強制補充や税率の一時的適正化を行う）
+        country.economy = max(10.0, country.economy * 0.9) # 内戦による経済ダメージ（10%減）
+        country.military = max(0.5, country.economy * 0.1)  # 軍事力をGDPの10%にリセット
+        country.government_budget = country.economy * 0.1 # 緊急予算の確保
+        country.tax_rate = 0.3 # 標準税率へ一旦リセット
+        
+        # 政府支持率の反転 (100% - 旧支持率) 
+        # 低い支持率で倒れた政府の交代劇であるほど、初期の熱狂（ハネムーン期間）が高くなる
+        country.approval_rating = max(50.0, 100.0 - country.approval_rating)
+        country.rebellion_risk = 0.0
+        
+        # 専制・独裁は民主化するかどうかの分岐
+        if country.government_type == GovernmentType.AUTHORITARIAN:
+            if random.random() < 0.3: # 30%で民主化
+                country.government_type = GovernmentType.DEMOCRACY
+                country.turns_until_election = 16
+                self.log_event(f"🕊️ {country_name}は民主化宣言を行いました！新政権は初の自由選挙に向けた準備を進めています。")
+            else:
+                self.log_event(f"🛡️ {country_name}では新たな軍事政権が実権を握り、引き続き強権的な統治が続きます。")
+        else:
+            # 民主主義が崩壊した場合、軍事政権化する可能性
+            if random.random() < 0.4:
+                country.government_type = GovernmentType.AUTHORITARIAN
+                country.turns_until_election = None
+                self.log_event(f"⚔️ {country_name}の混乱に乗じて軍部が蜂起！民主政権は崩壊し、専制主義国家への道を歩み始めました。")
+            else:
+                self.log_event(f"🗳️ {country_name}で臨時政府が樹立され、早期の総選挙が約束されました。")
+                country.turns_until_election = 4
+        
+        # イデオロギーの刷新（非同期処理のため、メインループの「AIプロンプト」フェーズでAgentが思考する。
+        # ここではフラグだけを立て、ログは出さない。プロンプトへの渡し方はagent.py側の責任とする）
+        country.ideology = f"[新政権樹立フェーズ] 旧政権({country.ideology})を打倒した新政府の指針を策定中"
+        
+        # 秘密計画の破棄とターゲットのリセット
+        country.hidden_plans = "政権交代により過去の計画はすべて白紙撤回された。新たな国家戦略を立案せよ。"
+
         # 案C: クーデター時の「死のループ」を防ぐため、旧政権の負の遺産・基準となるペナルティをリセット
         country.national_debt = 0.0
         country.trade_deficit_counter = 0
@@ -965,7 +1019,96 @@ class WorldEngine:
         country.rebellion_risk = 0.0
         country.intelligence_level = 0.0  # 諜報組織も崩壊・リセット
         
-        self.pending_rebellions.append(name)
+        self.pending_rebellions.append(country_name)
+
+    def _execute_fragmentation(self, old_name: str, old_country: CountryState, base_instability: float):
+        """国家分裂の実行ロジック。最大100%の転覆(乗っ取り)を含む"""
+        
+        # 1. 離脱(奪取)されるリソース割合の決定
+        # 不満度(base_instability: 0~200程度) が高いほど、丸ごとひっくり返る可能性大
+        # 通常は20-40%、最悪のクーデターなら70-100%
+        mean_split_ratio = min(95.0, 20.0 + (base_instability * 0.4))
+        split_ratio = max(10.0, min(100.0, random.gauss(mean_split_ratio, 10.0))) / 100.0
+        
+        is_overthrow = split_ratio > 0.85 # 85%以上持っていかれたら事実上の国家転覆（旧体制が辺境に追いやられる）
+        
+        if is_overthrow:
+            self.log_event(f"🧨 【国家転覆】度重なる失政と圧政への怒りが爆発！{old_name}におけるクーデターは全土規模の革命へと発展し、国家がひっくり返りました！(国土奪取率: {split_ratio:.1%})")
+        else:
+            self.log_event(f"💥 【国家分裂】{old_name}にて分離独立運動が激化！政府のコントロールを外れ、一部地域が独立を宣言しました！(離脱率: {split_ratio:.1%})")
+            
+        # 2. Agentによる新国家名とイデオロギーの生成
+        from agent import AgentSystem # ここで動的インポート
+        dummy_agent = AgentSystem(None) # 生成用のダミーインスタンス
+        
+        # ログから市民の不満を探す
+        sns_logs = self.turn_sns_logs.get(old_name, [])
+        new_name, new_ideology = dummy_agent.generate_fragmentation_profile(old_name, sns_logs)
+        
+        # （重要）名前の重複チェック
+        if new_name == old_name or new_name in self.state.countries:
+            new_name = f"新{old_name}共和国"
+            
+        # 3. リソースの分割
+        new_economy = max(1.0, old_country.economy * split_ratio)
+        new_military = max(0.5, old_country.military * split_ratio)
+        new_area = max(1.0, old_country.area * split_ratio)
+        new_debt = old_country.national_debt * split_ratio
+        
+        old_country.economy = max(1.0, old_country.economy - new_economy)
+        old_country.military = max(0.5, old_country.military - new_military)
+        old_country.area = max(1.0, old_country.area - new_area)
+        old_country.national_debt = max(0.0, old_country.national_debt - new_debt)
+        
+        if is_overthrow:
+             # 事実上の乗っ取りなので新国家が旧体制の借金を帳消し（デフォルト）にすることが多い
+             new_debt *= 0.2
+             
+        # 政体の反転/決定
+        new_gov_type = GovernmentType.DEMOCRACY if old_country.government_type == GovernmentType.AUTHORITARIAN else GovernmentType.AUTHORITARIAN
+        if random.random() < 0.2: # 20%で偶然同じ政体になる（内ゲバ）
+            new_gov_type = old_country.government_type
+
+        # 4. 新国家オブジェクトの生成
+        new_country = CountryState(
+            name=new_name,
+            economy=new_economy,
+            military=new_military,
+            approval_rating=80.0, # 独立初期の熱狂
+            government_type=new_gov_type,
+            ideology=new_ideology,
+            press_freedom=0.8 if new_gov_type == GovernmentType.DEMOCRACY else 0.2,
+            target_country=old_name, # 当面は旧国を強く意識
+            area=new_area
+        )
+        new_country.national_debt = new_debt
+        if new_gov_type == GovernmentType.DEMOCRACY:
+            new_country.turns_until_election = 16
+            
+        # 世界に追加
+        self.state.countries[new_name] = new_country
+        
+        # 5. 外交関係（平和的独立か、内戦か）
+        if old_country.government_type == GovernmentType.DEMOCRACY:
+            # Velvet Divorce（平和的独立）
+            self.log_event(f"🤝 民主的な手続き（住民投票等）により、{new_name}の独立が平和裏に承認されました。旧体制との間に武力衝突はありません。")
+            old_country.approval_rating = max(30.0, old_country.approval_rating) # やや落ち着く
+        else:
+            # Secessionist War（内戦突入）
+            self.log_event(f"⚔️ 【独立戦争勃発】{old_name}の独裁体制は独立を許さず、直ちに{new_name}に対する武力鎮圧を開始！凄惨な内戦に突入しました！")
+            war = WarState(
+                id=str(uuid.uuid4()),
+                aggressor=old_name,
+                defender=new_name,
+                turn_started=self.state.turn,
+                target_occupation_progress=0.0
+            )
+            self.state.active_wars.append(war)
+            
+        # もし100%乗っ取られて旧政権のリソースが微小（1.0未満）になった場合、事実上の滅亡処理
+        if old_country.economy <= 1.5 or old_country.military <= 1.0:
+             self._handle_defeat(old_name, new_name)
+             self.log_event(f"☠️ 【旧体制消滅】リソースのほぼ全てを掌握した{new_name}により、旧体制({old_name})は完全に歴史から抹消されました。")
 
     def advance_time(self):
         self.state.turn += 1

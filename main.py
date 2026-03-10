@@ -308,6 +308,9 @@ def main():
                     if p and p.strip():
                          sns_timelines[country].append({"author": "Citizen", "text": p})
                          
+        # 分裂ロジック等のためにエンジンのステートに現ターンのSNSログを保存
+        engine.turn_sns_logs = sns_timelines.copy()
+
         engine.evaluate_public_opinion(sns_timelines, media_modifiers)
         logger.display_sns_timeline(sns_timelines)
         
