@@ -27,7 +27,7 @@ MAX_MILITARY_FATIGUE_ALPHA = 0.20
 
 # マクロ経済モデル (SNA基準) の新しい定数
 BASE_INVESTMENT_RATE = 0.14          # 基礎的な民間投資性向
-GOVERNMENT_CROWD_IN_MULTIPLIER = 0.3 # 経済予算が民間投資を誘発する乗数
+GOVERNMENT_CROWD_IN_MULTIPLIER = 0.05 # 経済予算が民間投資を誘発する乗数
 GOVERNMENT_CROWD_OUT_MULTIPLIER = 0.15# 軍事予算が民間投資を抑制する乗数
 DEBT_REPAYMENT_CROWD_IN_MULTIPLIER = 0.8 # 政府の余剰金・債務返済が民間投資市場に還流する乗数
 TAX_APPROVAL_PENALTY_MULTIPLIER = 200.0 # 増税1%につき支持率が2%低下する係数
@@ -458,7 +458,7 @@ class WorldEngine:
                 breakthrough_multiplier += random.uniform(0.01, 0.05)
                 
         # 強制的にキャップをかける（バブル抑制）
-        breakthrough_multiplier = min(1.30, breakthrough_multiplier)
+        breakthrough_multiplier = min(1.10, breakthrough_multiplier)
         
         I *= breakthrough_multiplier
 
@@ -481,9 +481,14 @@ class WorldEngine:
         if debt_to_gdp > DEBT_TO_GDP_PENALTY_THRESHOLD and self.state.turn % 5 == 0:
             self.sys_logs_this_turn.append(f"[{country.name} 債務警告] 対GDP比{debt_to_gdp:.1%}。利払い負担が増大しています")
         
-        # ===== 人口動態モデル (人口転換理論) =====
+        # ===== 人口動態モデル (ロジスティック方程式と環境収容力) =====
         old_pop = country.population
         gdp_per_capita = old_gdp / max(0.1, old_pop)
+        
+        # 環境収容力(K): 面積(平方km) × 1平方kmあたりの最大人口定数(例: 150人など)
+        # ※現実の1平方kmあたり限界密度は国によるが、ゲームバランスとして例えば面積1000万km2の国で15億人を上限とする
+        CARRYING_CAPACITY_COEFFICIENT = 150.0 
+        carrying_capacity = max(10.0, country.area * CARRYING_CAPACITY_COEFFICIENT)
         
         # 出生率: 基礎2%。1人当たりGDPと教育水準が高いほど低下 (少子化の罠)
         base_birth_rate = 0.02
@@ -492,15 +497,32 @@ class WorldEngine:
         welfare_birth_bonus = inv_wel * 0.01 * execution_power
         birth_rate = max(0.001, base_birth_rate - birth_rate_reduction + welfare_birth_bonus)
         
-        # 死亡率: 通常0.5%。貧困(GDP per capita < 10000)や災害で増加
+        # 死亡率: 通常0.5%。絶対的貧困(GDP per capita < 0.8)や災害で増加
         base_death_rate = 0.005
-        # ※初期のGDPが25000, 人口340ならgdp_per_capita = 73.5 なので、10000ではなく100程度を基準とする
         poverty_death_increase = max(0.0, 0.01 - (gdp_per_capita / 50.0))
         disaster_death_increase = disaster_damage_sum / 5000.0
         death_rate = base_death_rate + poverty_death_increase + disaster_death_increase
         
-        pop_growth_rate = birth_rate - death_rate
+        # ロジスティック方程式に基づく人口増加率の計算 (環境収容力に近づくほど増加率が0になる)
+        # N(t+1) = N(t) + r * N(t) * (1 - N(t) / K)
+        intrinsic_growth_rate = birth_rate - death_rate
+        pop_growth_rate = intrinsic_growth_rate * (1.0 - (old_pop / carrying_capacity))
         country.population = max(0.1, old_pop * (1.0 + pop_growth_rate))
+        
+        # --- 人口過密(Overpopulation)ペナルティ ---
+        density_ratio = country.population / carrying_capacity
+        if density_ratio > 0.90:
+            # 収容力の90%を超えた場合、住宅・インフラの逼迫による強力な支持率ペナルティ
+            density_penalty = (density_ratio - 0.90) * 100.0 # 最大10%程度の低下
+            country.approval_rating = max(0.0, country.approval_rating - density_penalty)
+            self.sys_logs_this_turn.append(f"[{country.name} 人口過密] 密集率{density_ratio:.1%}。インフラ逼迫により支持率 -{density_penalty:.1f}%")
+        
+        # --- 1人当たりGDP急低下/絶対的貧困による社会不安ペナルティ ---
+        # 1. 絶対的貧困ライン (世界銀行基準の過度な貧困: 年間約800ドル相当をシミュレーション上の0.8とする)
+        if gdp_per_capita < 0.8:
+            extreme_poverty_penalty = 5.0 # 毎ターン強烈に下がる
+            country.approval_rating = max(0.0, country.approval_rating - extreme_poverty_penalty)
+            self.sys_logs_this_turn.append(f"[{country.name} 絶対的貧困] GDP/C {gdp_per_capita:.2f}未満による暴動・社会不安 (支持率 -{extreme_poverty_penalty:.1f}%)")
         
         # 経済力がゼロ以下になるのを防ぐ
         country.economy = max(1.0, new_gdp_provisional)
@@ -541,6 +563,12 @@ class WorldEngine:
         # 成長率ボーナスの計算 (総GDPではなく1人当たりGDPの成長率を使用し、人口増による豊かさの希釈と過剰動員ペナルティを反映)
         new_gdp_per_capita = country.economy / max(0.1, country.population)
         gdp_growth_rate = (new_gdp_per_capita - gdp_per_capita) / max(1.0, gdp_per_capita) * 100.0
+
+        # 2. 相対的な貧困ショック (1人当たりGDPが前期比で-5.0%以上急落した場合)
+        if gdp_growth_rate < -5.0:
+            relative_poverty_penalty = min(10.0, abs(gdp_growth_rate) * 0.5)
+            country.approval_rating = max(0.0, country.approval_rating - relative_poverty_penalty)
+            self.sys_logs_this_turn.append(f"[{country.name} 生活水準急落] GDP/C成長率 {gdp_growth_rate:.1f}%。市民の経済的不安増大 (支持率 -{relative_poverty_penalty:.1f}%)")
 
         
         # --- 福祉ボーナスによる支持率還元 ---
