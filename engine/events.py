@@ -81,7 +81,15 @@ class EventsMixin:
                 damage = max(min_dmg, damage)
                 new_event = DisasterEvent(turn=self.state.turn, name=name, damage_percent=damage)
                 self.state.disaster_history.append(new_event)
-                self.log_event(f"🚨 【世界規模の厄災発生】{name}が発生！世界全体で推定 -{damage:.1f}% の経済ダメージによる大混乱が起きています。", involved_countries=["global"])
+                
+                # 人口減少処理を追加 (被害比例型)
+                total_pop_loss = 0.0
+                for c in self.state.countries.values():
+                    pop_loss = c.population * (damage / 100.0) * 0.05 # 経済被害率の5%相当が犠牲に
+                    c.population = max(0.1, c.population - pop_loss)
+                    total_pop_loss += pop_loss
+                
+                self.log_event(f"🚨 【世界規模の厄災発生】{name}が発生！世界全体で推定 -{damage:.1f}% の経済ダメージと、約 {total_pop_loss:.1f}M（百万人）の犠牲者による大混乱が起きています。", involved_countries=["global"])
                 break # 一度に複数起きる確率は無視する（処理軽減）
                 
         # 2. 国規模災害
@@ -111,7 +119,12 @@ class EventsMixin:
                     damage = max(min_dmg, damage)
                     new_event = DisasterEvent(turn=self.state.turn, country=country_name, name=name, damage_percent=damage)
                     self.state.disaster_history.append(new_event)
-                    self.log_event(f"🌪️ 【国家災害発生】{country_name}で{name}が直撃し、-{damage:.1f}% に相当する経済ダメージを受けました！", involved_countries=[country_name, "global"])
+                    
+                    # 人口減少処理 (被害比例型)
+                    pop_loss = country.population * (damage / 100.0) * 0.1 # 国家災害は局所的な分、比率を高め(10%)に
+                    country.population = max(0.1, country.population - pop_loss)
+                    
+                    self.log_event(f"🌪️ 【国家災害発生】{country_name}で{name}が直撃し、-{damage:.1f}% に相当する経済ダメージと約 {pop_loss:.2f}M 人の犠牲者を出しました！", involved_countries=[country_name, "global"])
                     break # 同一国内で複数同時被災は無視
                     
         # ------------- 技術革新 -------------

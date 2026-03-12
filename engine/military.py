@@ -18,12 +18,18 @@ class MilitaryMixin:
             def_power = defender.military * DEFENDER_ADVANTAGE_MULTIPLIER
             agg_power = aggressor.military
             
-            # お互いへの軍事ダメージ（相手戦力の10%程度）
             agg_damage = def_power * random.uniform(0.05, 0.15)
             def_damage = agg_power * random.uniform(0.05, 0.15)
             
+            # 人口減少計算（軍事ダメージ割合に比例。防衛側は戦場となるため民間人被害が大きい）
+            agg_pop_loss = aggressor.population * (agg_damage / max(1.0, aggressor.military)) * 0.05
+            def_pop_loss = defender.population * (def_damage / max(1.0, defender.military)) * 0.15
+            
             aggressor.military = max(0.0, aggressor.military - agg_damage)
             defender.military = max(0.0, defender.military - def_damage)
+            
+            aggressor.population = max(0.1, aggressor.population - agg_pop_loss)
+            defender.population = max(0.1, defender.population - def_pop_loss)
             
             # 経済デバフ（戦争状態による疲弊）
             aggressor.economy *= 0.98
@@ -42,7 +48,8 @@ class MilitaryMixin:
             self.log_event(
                 f"🔥 【戦況報告】{war.aggressor} vs {war.defender} | "
                 f"占領進捗: {war.target_occupation_progress:.1f}% "
-                f"(両軍に損害発生: {aggressor.name}軍残{aggressor.military:.0f} / {defender.name}軍残{defender.military:.0f})",
+                f"(両軍損害: {aggressor.name}軍残{aggressor.military:.0f} / {defender.name}軍残{defender.military:.0f} | "
+                f"民間人犠牲: {aggressor.name} {agg_pop_loss:.2f}M, {defender.name} {def_pop_loss:.2f}M)",
                 involved_countries=[war.aggressor, war.defender, "global"]
             )
             
