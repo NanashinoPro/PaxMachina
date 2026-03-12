@@ -35,6 +35,7 @@ def initialize_world() -> WorldState:
                 rebellion_risk=float(row["rebellion_risk"]) if row["rebellion_risk"] else 0.0,
                 press_freedom=float(row["press_freedom"]),
                 education_level=float(row["education_level"]),
+                initial_education_level=float(row["education_level"]),
                 population=float(row["population"]),
                 initial_population=float(row["population"]),
                 hidden_plans=""
@@ -256,14 +257,23 @@ def main():
                     if proposal.proposer not in world_state.countries or proposal.target not in world_state.countries:
                         continue
                     summit_news_result, full_summit_log = agent_system.run_summit(proposal, ca, cb, world_state, past_news=past_news_queue)
-                    world_state.news_events.append(summit_news_result)
-                    recent_summit_logs.append(full_summit_log)
-                    logger.display_category_events([summit_news_result], f"首脳会談: {proposal.proposer} & {proposal.target}", style="bold cyan", icon="🤝")
+                    
+                    is_private_summit = getattr(proposal, 'is_private', False)
+                    if summit_news_result:
+                        world_state.news_events.append(summit_news_result)
+                        logger.display_category_events([summit_news_result], f"首脳会談: {proposal.proposer} & {proposal.target}", style="bold cyan", icon="🤝")
+                    else:
+                        logger.sys_log(f"[非公開会談完了] {proposal.proposer} & {proposal.target}")
+                        
+                    if not is_private_summit:
+                        recent_summit_logs.append(full_summit_log)
+                        
                     world_state.summit_logs.append({
                         "turn": world_state.turn,
                         "participants": [proposal.proposer, proposal.target],
                         "topic": proposal.topic,
-                        "log": full_summit_log
+                        "log": full_summit_log,
+                        "is_private": is_private_summit
                     })
         else:
             print("今期、首脳会談は行われませんでした。")

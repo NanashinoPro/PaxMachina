@@ -8,7 +8,7 @@ from scipy.stats import skewnorm
 from typing import Dict, List, Any
 
 # Local imports
-from models import WorldState, CountryState, GovernmentType, RelationType, AgentAction, WarState, TradeState, SanctionState, SummitProposal, AllianceProposal
+from models import WorldState, CountryState, GovernmentType, RelationType, AgentAction, WarState, TradeState, SanctionState, SummitProposal, AllianceProposal, AnnexationProposal
 
 # --- 定数（プロトコルパラメータ）定義 ---
 DEMOCRACY_WARN_APPROVAL = 40.0
@@ -111,6 +111,10 @@ class WorldEngine:
         self.turn_domestic_factors = {}
         self.turn_sns_logs = {} # Reset SNS logs for the current turn
         self.turn_dutch_disease_penalty = {} # オランダ病（援助過剰）による政策実行力デバフ
+        
+        # 毎ターンの秘匿メッセージリセット
+        for country in self.state.countries.values():
+            country.private_messages = []
         
         # 0. 基礎予算の算出と属国化による外交権のオーバーライド
         for country_name, country in self.state.countries.items():
@@ -620,9 +624,14 @@ class WorldEngine:
             if target_name not in self.state.countries:
                 continue
                 
-            # メッセージ送信（ログに残すだけ）
+            # メッセージ送信
             if dip.message:
-                self.log_event(f"[{country_name} -> {target_name}] メッセージ送信: {dip.message}")
+                if getattr(dip, 'is_private', False):
+                    self.sys_logs_this_turn.append(f"[非公開メッセージ] {country_name} -> {target_name}: {dip.message}")
+                    if target_name in self.state.countries:
+                        self.state.countries[target_name].private_messages.append(f"【{country_name}からの極秘通信】\n{dip.message}")
+                else:
+                    self.log_event(f"[{country_name} -> {target_name}] メッセージ送信: {dip.message}")
                 
             # 同盟提案の処理 (相互合意メカニズム: 相手も同ターンまたは前ターンにpropose_allianceしていれば成立)
             if dip.propose_alliance:
@@ -686,8 +695,14 @@ class WorldEngine:
 
             # 首脳会談の提案
             if dip.propose_summit:
-                self.state.pending_summits.append(SummitProposal(proposer=country_name, target=target_name, topic=dip.summit_topic))
-                self.log_event(f"✉️ {country_name}が{target_name}に対して首脳会談を提案しました。議題: {dip.summit_topic}")
+                is_private_summit = getattr(dip, 'is_private', False)
+                self.state.pending_summits.append(SummitProposal(proposer=country_name, target=target_name, topic=dip.summit_topic, is_private=is_private_summit))
+                if is_private_summit:
+                    self.sys_logs_this_turn.append(f"[非公開会談提案] {country_name} -> {target_name}: {dip.summit_topic}")
+                    if target_name in self.state.countries:
+                        self.state.countries[target_name].private_messages.append(f"【{country_name}からの極秘の会談提案】\n議題: {dip.summit_topic}")
+                else:
+                    self.log_event(f"✉️ {country_name}が{target_name}に対して首脳会談を提案しました。議題: {dip.summit_topic}")
 
             # 首脳会談の受諾
             if dip.accept_summit:
@@ -696,9 +711,44 @@ class WorldEngine:
                 if matched:
                     proposal = matched[0]
                     self.summits_to_run_this_turn.append(proposal)
-                    self.log_event(f"✅ {country_name}が{target_name}からの首脳会談の提案（議題: {proposal.topic}）を受諾しました。会談が開催されます。")
+                    if proposal.is_private:
+                        self.sys_logs_this_turn.append(f"[非公開会談受諾] {country_name}が{target_name}からの提案を受諾。")
+                    else:
+                        self.log_event(f"✅ {country_name}が{target_name}からの首脳会談の提案（議題: {proposal.topic}）を受諾しました。会談が開催されます。")
                     self.state.pending_summits.remove(proposal)
                     
+            # 平和的統合（吸収合併）の提案
+            if getattr(dip, 'propose_annexation', False):
+                existing = [a for a in self.state.pending_annexations if a.proposer == country_name and a.target == target_name]
+                if not existing:
+                    self.state.pending_annexations.append(AnnexationProposal(proposer=country_name, target=target_name))
+                    if getattr(dip, 'is_private', False):
+                         self.sys_logs_this_turn.append(f"[非公開統合提案] {country_name} -> {target_name}")
+                         if target_name in self.state.countries:
+                             self.state.countries[target_name].private_messages.append(f"【{country_name}からの極秘の国家統合提案】\n我が国への合流を提案する。")
+                    else:
+                         self.log_event(f"📜 {country_name}が{target_name}に対して平和的で対等な「国家統合」を提案しました。（{target_name}の合意を待機中）")
+
+            # 平和的統合の受諾
+            if getattr(dip, 'accept_annexation', False):
+                matched = [a for a in self.state.pending_annexations if a.proposer == target_name and a.target == country_name]
+                if matched:
+                    proposal = matched[0]
+                    self.state.pending_annexations.remove(proposal)
+                    # 統合受諾ロジック: 専制は即決、民主は支持率による確率
+                    if country.government_type == GovernmentType.DEMOCRACY:
+                        roll = random.uniform(0.0, 100.0)
+                        if roll > country.approval_rating:
+                            self.log_event(f"❌ {country_name}の指導部が{target_name}との国家統合を試みましたが、国民投票および議会で反対多数により否決され、統合は白紙となりました。")
+                            self.sys_logs_this_turn.append(f"[{country_name} 統合否決] 乱数 {roll:.1f} > 支持率 {country.approval_rating:.1f}")
+                            continue # 次のdiplomatic policyへ
+                        else:
+                            self.sys_logs_this_turn.append(f"[{country_name} 統合承認] 乱数 {roll:.1f} <= 支持率 {country.approval_rating:.1f}")
+
+                    self._handle_peaceful_annexation(target_name, country_name)
+                    # 統合された国はすでにself.state.countriesから削除されているため、これ以上ループを進めない
+                    break
+
     def _process_trade_and_sanctions(self):
         # 期限切れ提案のクリア（1ターンのみ有効）
         self.state.pending_summits = [s for s in self.state.pending_summits if s not in self.summits_to_run_this_turn]
@@ -1037,9 +1087,10 @@ class WorldEngine:
         # 3. 経済制裁の解除
         self.state.active_sanctions = [s for s in self.state.active_sanctions if s.imposer != loser_name and s.target != loser_name]
         
-        # 4. 保留中の提案（会談・同盟）の削除
+        # 4. 保留中の提案（会談・同盟・統合）の削除
         self.state.pending_summits = [s for s in self.state.pending_summits if s.proposer != loser_name and s.target != loser_name]
         self.state.pending_alliances = [a for a in self.state.pending_alliances if a.proposer != loser_name and a.target != loser_name]
+        self.state.pending_annexations = [a for a in self.state.pending_annexations if a.proposer != loser_name and a.target != loser_name]
         
         # 5. 技術革新の原産国が敗北した場合（必要に応じて）
         for bt in self.state.active_breakthroughs:
@@ -1047,6 +1098,35 @@ class WorldEngine:
                 # 原産国が滅んでも技術自体は普及し続ける可能性があるが、ここでは伝播を維持し、原産国の表示のみ考慮
                 pass
 
+    def _handle_peaceful_annexation(self, absorber_name: str, absorbed_name: str):
+        absorber = self.state.countries[absorber_name]
+        absorbed = self.state.countries[absorbed_name]
+        
+        self.log_event(f"🕊️ 【国家統合】歴史的合意に基づき、{absorbed_name}は国家を解散し、{absorber_name}と平和的に統合しました！")
+        
+        # 併合ボーナス (リソースの完全引継ぎ)
+        absorber.economy += absorbed.economy
+        absorber.military += absorbed.military
+        absorber.population += absorbed.population
+        absorber.initial_population += absorbed.initial_population
+        # 行政の効率化・技術の統合：諜報や教育は（平均ではなく）高い方をベースにボーナスを加える等も考えられるが、ここでは現状を維持しつつ少し微増させる
+        absorber.intelligence_level = max(absorber.intelligence_level, absorbed.intelligence_level) + 1.0
+        
+        # 国債の引継ぎ
+        absorber.national_debt += absorbed.national_debt
+        
+        self.log_event(f"📈 {absorber_name}は{absorbed_name}の全領土、インフラ、そして市民を迎え入れ、新たな大国家として生まれ変わりました。")
+        
+        # 吸収された国を世界から削除
+        del self.state.countries[absorbed_name]
+        
+        # 関連するデータのクリーンアップ
+        self.state.active_wars = [w for w in self.state.active_wars if w.aggressor != absorbed_name and w.defender != absorbed_name]
+        self.state.active_trades = [t for t in self.state.active_trades if t.country_a != absorbed_name and t.country_b != absorbed_name]
+        self.state.active_sanctions = [s for s in self.state.active_sanctions if s.imposer != absorbed_name and s.target != absorbed_name]
+        self.state.pending_summits = [s for s in self.state.pending_summits if s.proposer != absorbed_name and s.target != absorbed_name]
+        self.state.pending_alliances = [a for a in self.state.pending_alliances if a.proposer != absorbed_name and a.target != absorbed_name]
+        self.state.pending_annexations = [a for a in self.state.pending_annexations if a.proposer != absorbed_name and a.target != absorbed_name]
 
 
     from models import DisasterEvent

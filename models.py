@@ -50,6 +50,7 @@ class CountryState(BaseModel):
     hidden_plans: str = Field("", description="AI自身が記録する秘密の目標や計画")
     leaked_intel: List[str] = Field(default_factory=list, description="過去に他国に漏洩した自国の機密情報の履歴（自国は気づいていない体で管理）")
     stat_history: List[Dict[str, float]] = Field(default_factory=list, description="過去のステータス履歴（直近4ターン分程度保持）")
+    private_messages: List[str] = Field(default_factory=list, description="当ターンに他国から受け取った非公開メッセージや提案のリスト")
     
     # 対外援助・属国化関連
     dependency_ratio: Dict[str, float] = Field(default_factory=dict, description="他国に対する経済的依存度（0.0-1.0）。60%を超えると属国化する")
@@ -75,8 +76,11 @@ class DiplomaticAction(BaseModel):
     """特定のターゲット国へ向けた外交・軍事・諜報アクション"""
     target_country: str = Field(..., description="対象となる国名")
     message: Optional[str] = Field(None, description="メッセージ内容（あれば）")
+    is_private: bool = Field(False, description="対象国とのやり取り（メッセージや会談提案）を第三国に非公開にするかどうか")
     propose_alliance: bool = Field(False, description="同盟を提案するかどうか")
     declare_war: bool = Field(False, description="宣戦布告するかどうか")
+    propose_annexation: bool = Field(False, description="対象国に対して、自国への平和的な統合（吸収合併）を提案するか")
+    accept_annexation: bool = Field(False, description="前のターンに対象国から提案された平和的統合を受諾するか（受諾した場合、自国は対象国に吸収され消滅します）")
     
     # 諜報工作
     espionage_gather_intel: bool = Field(False, description="対象国の弱点や機密情報を収集するための諜報活動を行うか (任意)")
@@ -140,6 +144,12 @@ class SummitProposal(BaseModel):
     proposer: str
     target: str
     topic: str
+    is_private: bool = Field(False, description="当該会談を非公開で行うか（他国には会談したことすら秘匿される）")
+
+class AnnexationProposal(BaseModel):
+    """平和的統合の保留中の提案"""
+    proposer: str = Field(..., description="統合（吸収）を提案した国")
+    target: str = Field(..., description="提案された（吸収される）国")
 
 class BreakthroughState(BaseModel):
     """技術革新（GPTs）の進行状態"""
@@ -171,10 +181,11 @@ class WorldState(BaseModel):
     active_sanctions: List[SanctionState] = Field(default_factory=list, description="発動中の経済制裁リスト")
     pending_summits: List[SummitProposal] = Field(default_factory=list, description="前ターンに提案された首脳会談のリスト")
     pending_alliances: List[AllianceProposal] = Field(default_factory=list, description="前ターンに提案された同盟のリスト（相互合意メカニズム）")
+    pending_annexations: List[AnnexationProposal] = Field(default_factory=list, description="前ターンに提案された平和的統合のリスト")
     active_breakthroughs: List[BreakthroughState] = Field(default_factory=list, description="現在進行中の技術革新")
     disaster_history: List[DisasterEvent] = Field(default_factory=list, description="過去に発生した重大災害の履歴")
     
     # ログ・UI用データ
     news_events: List[str] = Field(default_factory=list, description="前ターンに世界で起きた公開イベント（ニュース）")
     sns_logs: Dict[str, List[dict]] = Field(default_factory=dict, description="各国のSNS投稿とその感情スコア、検閲結果、および投稿者（Leader/Citizen/Espionage）の履歴")
-    summit_logs: List[dict] = Field(default_factory=list, description="過去の首脳会談の議事録リスト。{'turn': int, 'participants': [str, str], 'log': str} 形式など")
+    summit_logs: List[dict] = Field(default_factory=list, description="過去の首脳会談の議事録リスト。{'turn': int, 'participants': [str, str], 'log': str, 'summary': str, 'is_private': bool} 形式など")
