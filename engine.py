@@ -10,6 +10,8 @@ from typing import Dict, List, Any
 # Local imports
 from models import WorldState, CountryState, GovernmentType, RelationType, AgentAction, WarState, TradeState, SanctionState, SummitProposal, AllianceProposal, AnnexationProposal
 
+# db_managerのインポートはmain.py側で行い、engineにはインスタンスを渡す
+
 # --- 定数（プロトコルパラメータ）定義 ---
 DEMOCRACY_WARN_APPROVAL = 40.0
 CRITICAL_APPROVAL = 15.0
@@ -63,7 +65,7 @@ DEMOCRACY_MIN_EXECUTION_POWER = 0.4 # 民主主義における政策実行力の
 class WorldEngine:
     """世界の毎ターンの出来事を処理し、状態を更新するエンジン"""
     
-    def __init__(self, initial_state: WorldState, analyzer=None):
+    def __init__(self, initial_state: WorldState, analyzer=None, db_manager=None):
         self.state = initial_state
         self.events_this_turn: List[str] = []
         self.sys_logs_this_turn: List[str] = []
@@ -74,8 +76,9 @@ class WorldEngine:
         self.pending_rebellions: List[str] = []
         self.pending_elections: List[str] = []
         
-        # 感情分析器（外部から注入）
+        # 感情分析器とデータベースマネージャー（外部から注入）
         self.analyzer = analyzer
+        self.db_manager = db_manager
         self.turn_domestic_factors: Dict[str, Dict[str, float]] = {}
         self.turn_sns_logs: Dict[str, List[Dict[str, Any]]] = {} # Added for fragmentation logic
         self.turn_dutch_disease_penalty: Dict[str, float] = {} # オランダ病（援助過剰）による政策実行力デバフ
@@ -87,8 +90,23 @@ class WorldEngine:
             # [追加] 政権の存続期間をインクリメント
             country.regime_duration += 1
 
-    def log_event(self, message: str):
+    def log_event(self, message: str, is_private: bool = False, involved_countries: List[str] = None):
+        """
+        イベントログを追加し、データベースが有効ならQdrantにも記録する。
+        """
         self.events_this_turn.append(message)
+        
+        if self.db_manager:
+            if involved_countries is None:
+                involved_countries = ["global"]
+            # プレフィックス(絵文字等)を除去したクリーンなテキストを使っても良いが、ここではそのまま保存
+            self.db_manager.add_event(
+                turn=self.state.turn,
+                event_type="news",
+                content=message,
+                is_private=is_private,
+                involved_countries=involved_countries
+            )
 
     def process_turn(self, actions: Dict[str, AgentAction]) -> WorldState:
         """
@@ -180,7 +198,7 @@ class WorldEngine:
             # 支持率低下による反乱リスク
             if country.approval_rating < 30.0:
                 country.rebellion_risk += 5.0
-                self.log_event(f"⚠️ {name}の国内で政府への抗議運動が激化しています。(支持率{country.approval_rating:.1f}%)")
+                self.log_event(f"⚠️ {name}の国内で政府への抗議運動が激化しています。(支持率{country.approval_rating:.1f}%)", involved_countries=[name])
             else:
                 country.rebellion_risk = max(0.0, country.rebellion_risk - 2.0)
                 
@@ -191,7 +209,7 @@ class WorldEngine:
                     # 30%で0、0%で100%になるクーデター確率
                     coup_prob = max(0.0, (30.0 - country.approval_rating) / 30.0 * 100.0)
                     if random.uniform(0.0, 100.0) < coup_prob:
-                        self.log_event(f"⚠️ {name}で【政府機能麻痺】激しい暴動により民主政権が崩壊しました！(支持率{country.approval_rating:.1f}%)")
+                        self.log_event(f"⚠️ {name}で【政府機能麻痺】激しい暴動により民主政権が崩壊しました！(支持率{country.approval_rating:.1f}%)", involved_countries=[name, "global"])
                         self._handle_rebellion(name, country)
                         if name in self.state.countries and self.state.countries[name].turns_until_election is not None:
                             self.state.countries[name].turns_until_election = 16 # 米国の場合4年(16ターン)リセット
@@ -261,7 +279,7 @@ class WorldEngine:
                 
                 # ログ・ニュース
                 self.sys_logs_this_turn.append(f"[{donor_name} -> {target_name} 援助] 経済: {req_econ:.1f}, 軍事: {req_mil:.1f} (依存度 +{dependency_addition*100:.1f}%)")
-                self.log_event(f"💰 【対外援助】{donor_name}が{target_name}に対して莫大な援助（経済:{req_econ:.1f}, 軍事:{req_mil:.1f}）を実施しました。")
+                self.log_event(f"💰 【対外援助】{donor_name}が{target_name}に対して莫大な援助（経済:{req_econ:.1f}, 軍事:{req_mil:.1f}）を実施しました。", involved_countries=[donor_name, target_name])
 
         # 2. 援助の流入処理とオランダ病判定
         for target_name, target in self.state.countries.items():
@@ -298,11 +316,10 @@ class WorldEngine:
             target.economy += total_econ # 経済援助はGDPを直接ブースト
             target.military += total_mil # 軍事力ストックに追加
             
-            # 属国化の閾値判定
             for donor_name, dep_ratio in target.dependency_ratio.items():
                 if dep_ratio > 0.60 and target.suzerain != donor_name:
                     target.suzerain = donor_name
-                    self.log_event(f"👑 【属国化】{target_name}は{donor_name}からの巨額の経済・軍事支援により主権を喪失し、完全に{donor_name}の属国（傀儡国家）となりました。")
+                    self.log_event(f"👑 【属国化】{target_name}は{donor_name}からの巨額の経済・軍事支援により主権を喪失し、完全に{donor_name}の属国（傀儡国家）となりました。", involved_countries=[target_name, donor_name, "global"])
                     self.sys_logs_this_turn.append(f"[{target_name} 属国化] {donor_name}への依存度が {dep_ratio*100:.1f}% に達し、主権喪失。")
 
     def _process_domestic(self, country_name: str, action: AgentAction):
@@ -311,6 +328,15 @@ class WorldEngine:
         # 秘密計画の更新
         if hasattr(action, 'update_hidden_plans') and action.update_hidden_plans:
             country.hidden_plans = action.update_hidden_plans
+            # 秘密計画をDBに保存（該当国のみアクセス可能）
+            if self.db_manager:
+                self.db_manager.add_event(
+                    turn=self.state.turn,
+                    event_type="secret_plan",
+                    content=f"{country_name}の極秘計画: {country.hidden_plans}",
+                    is_private=True,
+                    involved_countries=[country_name]
+                )
 
         # --- 税率調整と政治的コスト（支持率ペナルティ） ---
         old_tax_rate = country.tax_rate
@@ -630,14 +656,16 @@ class WorldEngine:
                     self.sys_logs_this_turn.append(f"[非公開メッセージ] {country_name} -> {target_name}: {dip.message}")
                     if target_name in self.state.countries:
                         self.state.countries[target_name].private_messages.append(f"【{country_name}からの極秘通信】\n{dip.message}")
+                    if self.db_manager:
+                        self.db_manager.add_event(self.state.turn, "secret_message", f"【{country_name}からの極秘通信】\n{dip.message}", True, [country_name, target_name])
                 else:
-                    self.log_event(f"[{country_name} -> {target_name}] メッセージ送信: {dip.message}")
+                    self.log_event(f"[{country_name} -> {target_name}] メッセージ送信: {dip.message}", involved_countries=[country_name, target_name])
                 
             # 同盟提案の処理 (相互合意メカニズム: 相手も同ターンまたは前ターンにpropose_allianceしていれば成立)
             if dip.propose_alliance:
                 rel = self._get_relation(country_name, target_name)
                 if rel == RelationType.AT_WAR:
-                    self.log_event(f"⚠️ {country_name}から{target_name}への同盟提案は戦争状態のため無効です。")
+                    self.log_event(f"⚠️ {country_name}から{target_name}への同盟提案は戦争状態のため無効です。", involved_countries=[country_name, target_name])
                 elif rel == RelationType.ALLIANCE:
                     pass  # 既に同盟済み
                 else:
@@ -646,14 +674,14 @@ class WorldEngine:
                     if matched:
                         # 双方合意成立！
                         self._update_relation(country_name, target_name, RelationType.ALLIANCE)
-                        self.log_event(f"🤝 {country_name}と{target_name}が相互合意の上、軍事同盟を締結しました。")
+                        self.log_event(f"🤝 {country_name}と{target_name}が相互合意の上、軍事同盟を締結しました。", involved_countries=[country_name, target_name, "global"])
                         self.state.pending_alliances.remove(matched[0])
                     else:
                         # 提案をキューに積む（翌ターン以降に相手が受諾すれば成立）
                         existing = [a for a in self.state.pending_alliances if a.proposer == country_name and a.target == target_name]
                         if not existing:
                             self.state.pending_alliances.append(AllianceProposal(proposer=country_name, target=target_name))
-                            self.log_event(f"✉️ {country_name}が{target_name}に対して軍事同盟を提案しました。（相手の合意を待機中）")
+                            self.log_event(f"✉️ {country_name}が{target_name}に対して軍事同盟を提案しました。（相手の合意を待機中）", involved_countries=[country_name, target_name])
                 
             # 宣戦布告
             if dip.declare_war:
@@ -663,7 +691,7 @@ class WorldEngine:
                     # 新しい戦争を作成
                     new_war = WarState(aggressor=country_name, defender=target_name)
                     self.state.active_wars.append(new_war)
-                    self.log_event(f"⚔️ 【開戦】{country_name}が{target_name}に対して宣戦布告しました！")
+                    self.log_event(f"⚔️ 【開戦】{country_name}が{target_name}に対して宣戦布告しました！", involved_countries=[country_name, target_name, "global"])
                     
             # 諜報工作
             if dip.espionage_gather_intel or dip.espionage_sabotage:
@@ -671,26 +699,26 @@ class WorldEngine:
 
             # 貿易・制裁
             if getattr(dip, 'propose_trade', False):
-                self.log_event(f"🤝 {country_name}から{target_name}へ貿易・経済協力の提案がなされました。")
+                self.log_event(f"🤝 {country_name}から{target_name}へ貿易・経済協力の提案がなされました。", involved_countries=[country_name, target_name])
                 rel = self._get_relation(country_name, target_name)
                 if rel != RelationType.AT_WAR:
                     existing = [t for t in self.state.active_trades if (t.country_a == country_name and t.country_b == target_name) or (t.country_a == target_name and t.country_b == country_name)]
                     if not existing:
                         self.state.active_trades.append(TradeState(country_a=country_name, country_b=target_name))
-                        self.log_event(f"🚢 {country_name}と{target_name}の間で貿易協定が開始されました。")
+                        self.log_event(f"🚢 {country_name}と{target_name}の間で貿易協定が開始されました。", involved_countries=[country_name, target_name, "global"])
             
             if getattr(dip, 'cancel_trade', False):
-                self.log_event(f"⚠️ {country_name}が{target_name}との貿易協定を破棄しました。")
+                self.log_event(f"⚠️ {country_name}が{target_name}との貿易協定を破棄しました。", involved_countries=[country_name, target_name, "global"])
                 self.state.active_trades = [t for t in self.state.active_trades if not ((t.country_a == country_name and t.country_b == target_name) or (t.country_a == target_name and t.country_b == country_name))]
             
             if getattr(dip, 'impose_sanctions', False):
-                self.log_event(f"⛔ {country_name}が{target_name}に対して本格的な経済制裁を発動しました。")
+                self.log_event(f"⛔ {country_name}が{target_name}に対して本格的な経済制裁を発動しました。", involved_countries=[country_name, target_name, "global"])
                 existing = [s for s in self.state.active_sanctions if s.imposer == country_name and s.target == target_name]
                 if not existing:
                     self.state.active_sanctions.append(SanctionState(imposer=country_name, target=target_name))
             
             if getattr(dip, 'lift_sanctions', False):
-                self.log_event(f"✅ {country_name}が{target_name}への経済制裁を解除しました。")
+                self.log_event(f"✅ {country_name}が{target_name}への経済制裁を解除しました。", involved_countries=[country_name, target_name, "global"])
                 self.state.active_sanctions = [s for s in self.state.active_sanctions if not (s.imposer == country_name and s.target == target_name)]
 
             # 首脳会談の提案
@@ -701,8 +729,10 @@ class WorldEngine:
                     self.sys_logs_this_turn.append(f"[非公開会談提案] {country_name} -> {target_name}: {dip.summit_topic}")
                     if target_name in self.state.countries:
                         self.state.countries[target_name].private_messages.append(f"【{country_name}からの極秘の会談提案】\n議題: {dip.summit_topic}")
+                    if self.db_manager:
+                        self.db_manager.add_event(self.state.turn, "summit_proposal", f"【{country_name}からの極秘の会談提案】\n議題: {dip.summit_topic}", True, [country_name, target_name])
                 else:
-                    self.log_event(f"✉️ {country_name}が{target_name}に対して首脳会談を提案しました。議題: {dip.summit_topic}")
+                    self.log_event(f"✉️ {country_name}が{target_name}に対して首脳会談を提案しました。議題: {dip.summit_topic}", involved_countries=[country_name, target_name])
 
             # 首脳会談の受諾
             if dip.accept_summit:
@@ -713,8 +743,10 @@ class WorldEngine:
                     self.summits_to_run_this_turn.append(proposal)
                     if proposal.is_private:
                         self.sys_logs_this_turn.append(f"[非公開会談受諾] {country_name}が{target_name}からの提案を受諾。")
+                        if self.db_manager:
+                             self.db_manager.add_event(self.state.turn, "summit_accept", f"【非公開の会談成立】{country_name}が{target_name}との極秘会談（議題: {proposal.topic}）について受諾した", True, [country_name, target_name])
                     else:
-                        self.log_event(f"✅ {country_name}が{target_name}からの首脳会談の提案（議題: {proposal.topic}）を受諾しました。会談が開催されます。")
+                        self.log_event(f"✅ {country_name}が{target_name}からの首脳会談の提案（議題: {proposal.topic}）を受諾しました。会談が開催されます。", involved_countries=[country_name, target_name, "global"])
                     self.state.pending_summits.remove(proposal)
                     
             # 平和的統合（吸収合併）の提案
@@ -726,8 +758,10 @@ class WorldEngine:
                          self.sys_logs_this_turn.append(f"[非公開統合提案] {country_name} -> {target_name}")
                          if target_name in self.state.countries:
                              self.state.countries[target_name].private_messages.append(f"【{country_name}からの極秘の国家統合提案】\n我が国への合流を提案する。")
+                         if self.db_manager:
+                             self.db_manager.add_event(self.state.turn, "annexation_proposal", f"【{country_name}からの極秘の統合提案】\n{target_name}に対して国家の統合を提案。秘密裏に行われた。", True, [country_name, target_name])
                     else:
-                         self.log_event(f"📜 {country_name}が{target_name}に対して平和的で対等な「国家統合」を提案しました。（{target_name}の合意を待機中）")
+                         self.log_event(f"📜 {country_name}が{target_name}に対して平和的で対等な「国家統合」を提案しました。（{target_name}の合意を待機中）", involved_countries=[country_name, target_name, "global"])
 
             # 平和的統合の受諾
             if getattr(dip, 'accept_annexation', False):
@@ -739,7 +773,7 @@ class WorldEngine:
                     if country.government_type == GovernmentType.DEMOCRACY:
                         roll = random.uniform(0.0, 100.0)
                         if roll > country.approval_rating:
-                            self.log_event(f"❌ {country_name}の指導部が{target_name}との国家統合を試みましたが、国民投票および議会で反対多数により否決され、統合は白紙となりました。")
+                            self.log_event(f"❌ {country_name}の指導部が{target_name}との国家統合を試みましたが、国民投票および議会で反対多数により否決され、統合は白紙となりました。", involved_countries=[country_name, target_name, "global"])
                             self.sys_logs_this_turn.append(f"[{country_name} 統合否決] 乱数 {roll:.1f} > 支持率 {country.approval_rating:.1f}")
                             continue # 次のdiplomatic policyへ
                         else:
@@ -939,13 +973,13 @@ class WorldEngine:
                 if any(k in strategy for k in ["sns", "情報", "フェイク", "デマ", "世論", "プロパガンダ", "インフル", "選挙", "メディア", "認知戦"]):
                     dmg_approval = random.uniform(10.0, 20.0)
                     dmg_econ_multiplier = 0.98
-                    self.log_event(f"📱 {target_name}のネット空間や社会で大規模な混乱や不審な世論操作の痕跡が確認され、政権支持率が急落しています。")
+                    self.log_event(f"📱 {target_name}のネット空間や社会で大規模な混乱や不審な世論操作の痕跡が確認され、政権支持率が急落しています。", involved_countries=[target_name, "global"])
                 elif any(k in strategy for k in ["インフラ", "爆破", "物理", "暗殺", "テロ", "マルウェア", "ハッキング", "システム", "電力", "サイバー", "通信", "ネットワーク"]):
                     dmg_econ_multiplier = 0.90
                     dmg_approval = random.uniform(2.0, 6.0)
-                    self.log_event(f"💻 {target_name}の社会インフラ・主要システムに原因不明の重大な障害が発生しました。")
+                    self.log_event(f"💻 {target_name}の社会インフラ・主要システムに原因不明の重大な障害が発生しました。", involved_countries=[target_name, "global"])
                 else:
-                    self.log_event(f"💣 {target_name}で社会不安を高める不審な事件が連続して発生しています。")
+                    self.log_event(f"💣 {target_name}で社会不安を高める不審な事件が連続して発生しています。", involved_countries=[target_name, "global"])
                     
                 target.approval_rating = max(0.0, target.approval_rating - dmg_approval)
                 target.economy *= dmg_econ_multiplier
@@ -962,9 +996,9 @@ class WorldEngine:
             # 発覚処理
             if is_discovered:
                 if is_success:
-                    self.log_event(f"🚨 【重大事態】{target_name}を襲った一連の事件について、当局の捜査により{attacker_name}の工作機関による関与であったことが特定され、白日の下に晒されました！")
+                    self.log_event(f"🚨 【重大事態】{target_name}を襲った一連の事件について、当局の捜査により{attacker_name}の工作機関による関与であったことが特定され、白日の下に晒されました！", involved_countries=[target_name, attacker_name, "global"])
                 else:
-                    self.log_event(f"🚨 【工作未遂・発覚】{target_name}の防諜機関が、{attacker_name}による工作計画「{action.espionage_sabotage_strategy}」を未然に阻止し、大々的に摘発しました！")
+                    self.log_event(f"🚨 【工作未遂・発覚】{target_name}の防諜機関が、{attacker_name}による工作計画「{action.espionage_sabotage_strategy}」を未然に阻止し、大々的に摘発しました！", involved_countries=[target_name, attacker_name, "global"])
             else:
                 if not is_success:
                      # 失敗かつ未発覚：相手のニュースにも自国のニュースにも出ない扱いとし、エージェントの思考ループを防ぐためプロンプトにはフィードバックしない
@@ -999,9 +1033,9 @@ class WorldEngine:
             # 発覚処理
             if is_discovered:
                 if is_success:
-                    self.log_event(f"🚨 【情報漏洩発覚】{target_name}の政府システムや要人周辺から、{attacker_name}へと何らかの機密情報が流出していた痕跡が発見されました。")
+                    self.log_event(f"🚨 【情報漏洩発覚】{target_name}の政府システムや要人周辺から、{attacker_name}へと何らかの機密情報が流出していた痕跡が発見されました。", involved_countries=[target_name, attacker_name, "global"])
                 else:
-                    self.log_event(f"🚨 【スパイ摘発】{attacker_name}の諜報員が{target_name}にて機密情報を探っていたところを現地当局に発見され、強制排除されました。情報の流出は阻止されました。")
+                    self.log_event(f"🚨 【スパイ摘発】{attacker_name}の諜報員が{target_name}にて機密情報を探っていたところを現地当局に発見され、強制排除されました。情報の流出は阻止されました。", involved_countries=[target_name, attacker_name, "global"])
 
 
     def _process_wars(self):
@@ -1043,7 +1077,8 @@ class WorldEngine:
             self.log_event(
                 f"🔥 【戦況報告】{war.aggressor} vs {war.defender} | "
                 f"占領進捗: {war.target_occupation_progress:.1f}% "
-                f"(両軍に損害発生: A軍残{aggressor.military:.0f} / D軍残{defender.military:.0f})"
+                f"(両軍に損害発生: A軍残{aggressor.military:.0f} / D軍残{defender.military:.0f})",
+                involved_countries=[war.aggressor, war.defender, "global"]
             )
             
             # 敗北判定
@@ -1220,15 +1255,15 @@ class WorldEngine:
         """
         import random
         roll = random.uniform(0.0, 100.0)
-        self.log_event(f"🗳️ {country_name}で国家元首の総選挙が実施されました。(現在の与党支持率: {country.approval_rating:.1f}%)")
+        self.log_event(f"🗳️ {country_name}で国家元首の総選挙が実施されました。(現在の与党支持率: {country.approval_rating:.1f}%)", involved_countries=[country_name])
         
         if roll <= country.approval_rating:
             # 再選
-            self.log_event(f"✅ 【選挙結果】{country_name}の現政権が過半数の信任を得て再選を果たしました！")
+            self.log_event(f"✅ 【選挙結果】{country_name}の現政権が過半数の信任を得て再選を果たしました！", involved_countries=[country_name])
             self.sys_logs_this_turn.append(f"[{country_name} 選挙] 乱数 {roll:.1f} <= 支持率 {country.approval_rating:.1f} により再選")
         else:
             # 敗北（政権交代）
-            self.log_event(f"🔄 【政権交代】{country_name}の選挙で現政権が敗北し、新たな指導者が選出されました。")
+            self.log_event(f"🔄 【政権交代】{country_name}の選挙で現政権が敗北し、新たな指導者が選出されました。", involved_countries=[country_name])
             self.sys_logs_this_turn.append(f"[{country_name} 選挙] 乱数 {roll:.1f} > 支持率 {country.approval_rating:.1f} により落選")
             
             # 敗北時の新政権の支持率は期待値として 100.0 - Approval にリセット（Option C準拠）
@@ -1272,7 +1307,7 @@ class WorldEngine:
             return
 
         # --- 2. 通常のクーデター（政権交代のみ） ---
-        self.log_event(f"🔄 【政権交代】{country_name}にてクーデターが成功し、新政府が樹立されました！")
+        self.log_event(f"🔄 【政権交代】{country_name}にてクーデターが成功し、新政府が樹立されました！", involved_countries=[country_name, "global"])
         
         # 【Option C】クーデター後の経済の立て直し（基本GDPのリセット＝悪循環の底打ち）
         # 旧政権の負債や非効率さをリセットし、新たなベースラインを設定する。
@@ -1295,17 +1330,17 @@ class WorldEngine:
             if random.random() < 0.3: # 30%で民主化
                 country.government_type = GovernmentType.DEMOCRACY
                 country.turns_until_election = 16
-                self.log_event(f"🕊️ {country_name}は民主化宣言を行いました！新政権は初の自由選挙に向けた準備を進めています。")
+                self.log_event(f"🕊️ {country_name}は民主化宣言を行いました！新政権は初の自由選挙に向けた準備を進めています。", involved_countries=[country_name, "global"])
             else:
-                self.log_event(f"🛡️ {country_name}では新たな軍事政権が実権を握り、引き続き強権的な統治が続きます。")
+                self.log_event(f"🛡️ {country_name}では新たな軍事政権が実権を握り、引き続き強権的な統治が続きます。", involved_countries=[country_name, "global"])
         else:
             # 民主主義が崩壊した場合、軍事政権化する可能性
             if random.random() < 0.4:
                 country.government_type = GovernmentType.AUTHORITARIAN
                 country.turns_until_election = None
-                self.log_event(f"⚔️ {country_name}の混乱に乗じて軍部が蜂起！民主政権は崩壊し、専制主義国家への道を歩み始めました。")
+                self.log_event(f"⚔️ {country_name}の混乱に乗じて軍部が蜂起！民主政権は崩壊し、専制主義国家への道を歩み始めました。", involved_countries=[country_name, "global"])
             else:
-                self.log_event(f"🗳️ {country_name}で臨時政府が樹立され、早期の総選挙が約束されました。")
+                self.log_event(f"🗳️ {country_name}で臨時政府が樹立され、早期の総選挙が約束されました。", involved_countries=[country_name])
                 country.turns_until_election = 4
         
         # イデオロギーの刷新（非同期処理のため、メインループの「AIプロンプト」フェーズでAgentが思考する。
@@ -1336,9 +1371,9 @@ class WorldEngine:
         is_overthrow = split_ratio > 0.85 # 85%以上持っていかれたら事実上の国家転覆（旧体制が辺境に追いやられる）
         
         if is_overthrow:
-            self.log_event(f"🧨 【国家転覆】度重なる失政と圧政への怒りが爆発！{old_name}におけるクーデターは全土規模の革命へと発展し、国家がひっくり返りました！(国土奪取率: {split_ratio:.1%})")
+            self.log_event(f"🧨 【国家転覆】度重なる失政と圧政への怒りが爆発！{old_name}におけるクーデターは全土規模の革命へと発展し、国家がひっくり返りました！(国土奪取率: {split_ratio:.1%})", involved_countries=[old_name, "global"])
         else:
-            self.log_event(f"💥 【国家分裂】{old_name}にて分離独立運動が激化！政府のコントロールを外れ、一部地域が独立を宣言しました！(離脱率: {split_ratio:.1%})")
+            self.log_event(f"💥 【国家分裂】{old_name}にて分離独立運動が激化！政府のコントロールを外れ、一部地域が独立を宣言しました！(離脱率: {split_ratio:.1%})", involved_countries=[old_name, "global"])
             
         # 2. Agentによる新国家名とイデオロギーの生成
         from agent import AgentSystem # ここで動的インポート
@@ -1408,11 +1443,11 @@ class WorldEngine:
         # 5. 外交関係（平和的独立か、内戦か）
         if old_country.government_type == GovernmentType.DEMOCRACY:
             # Velvet Divorce（平和的独立）
-            self.log_event(f"🤝 民主的な手続き（住民投票等）により、{new_name}の独立が平和裏に承認されました。旧体制との間に武力衝突はありません。")
+            self.log_event(f"🤝 民主的な手続き（住民投票等）により、{new_name}の独立が平和裏に承認されました。旧体制との間に武力衝突はありません。", involved_countries=[old_name, new_name, "global"])
             old_country.approval_rating = max(30.0, old_country.approval_rating) # やや落ち着く
         else:
             # Secessionist War（内戦突入）
-            self.log_event(f"⚔️ 【独立戦争勃発】{old_name}の独裁体制は独立を許さず、直ちに{new_name}に対する武力鎮圧を開始！凄惨な内戦に突入しました！")
+            self.log_event(f"⚔️ 【独立戦争勃発】{old_name}の独裁体制は独立を許さず、直ちに{new_name}に対する武力鎮圧を開始！凄惨な内戦に突入しました！", involved_countries=[old_name, new_name, "global"])
             war = WarState(
                 id=str(uuid.uuid4()),
                 aggressor=old_name,
@@ -1425,7 +1460,7 @@ class WorldEngine:
         # もし100%乗っ取られて旧政権のリソースが微小（1.0未満）になった場合、事実上の滅亡処理
         if old_country.economy <= 1.5 or old_country.military <= 1.0:
              self._handle_defeat(old_name, new_name)
-             self.log_event(f"☠️ 【旧体制消滅】リソースのほぼ全てを掌握した{new_name}により、旧体制({old_name})は完全に歴史から抹消されました。")
+             self.log_event(f"☠️ 【旧体制消滅】リソースのほぼ全てを掌握した{new_name}により、旧体制({old_name})は完全に歴史から抹消されました。", involved_countries=[old_name, new_name, "global"])
 
     def advance_time(self):
         self.state.turn += 1

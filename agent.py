@@ -3,7 +3,7 @@ import json
 import traceback
 from google import genai
 from google.genai import types
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,8 +16,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 class AgentSystem:
     """Gemini APIを使用して各国家の意思決定を行うAIエージェントシステム"""
-    def __init__(self, logger: SimulationLogger, model_name: str = "gemini-2.5-pro"): 
+    def __init__(self, logger: SimulationLogger, model_name: str = "gemini-2.5-pro", db_manager=None): 
         self.logger = logger
+        self.db_manager = db_manager
         # APIキーは環境変数から自動で読み込まれる想定
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
@@ -170,6 +171,22 @@ class AgentSystem:
             my_info += "（※これらは第三国には一切見えない非公開情報です）\n\n"
 
         my_info += f"あなたの脳内（非公開の計画など）には次のような情報があります: '{country_state.hidden_plans}'\n\n"
+        
+        # RAGベクトル検索による機密情報・過去の経緯の取得
+        if getattr(self, "db_manager", None):
+            try:
+                rag_results = self.db_manager.search_events(searcher_country=country_name, query="自国が関与している重要な外交・内政・諜報の機密イベントやニュース", limit=3)
+                if rag_results:
+                    my_info += "---🗄️【国家情報局(RAG) 過去の重要記録検索結果】🗄️---\n"
+                    my_info += "以下の情報はあなたの国が過去に関与、あるいは独自に取得した重大な出来事の記録です（非公開情報を含みます）。\n"
+                    for r in rag_results:
+                        t = r.get("turn", "?")
+                        evt = r.get("event_type", "event")
+                        cnt = r.get("content", "")
+                        my_info += f"-[Turn {t}] {cnt}\n"
+                    my_info += "（方針策定の際、この歴史的経緯を踏まえた上で判断してください）\n\n"
+            except Exception as e:
+                self.logger.sys_log(f"[{country_name}] RAG検索エラー: {e}", "ERROR")
         
         # 貿易情報の付与
         active_trades = world_state.active_trades if hasattr(world_state, 'active_trades') else []

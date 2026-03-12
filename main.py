@@ -8,6 +8,7 @@ from agent import AgentSystem
 from logger import SimulationLogger
 import summarizer
 import notifier
+from db_manager import DBManager
 
 def initialize_world() -> WorldState:
     """初期の歴史的状況をCSV(initial_stats.csv)から読み込んでWorldStateを返す"""
@@ -107,15 +108,17 @@ def main():
         logger = SimulationLogger()
         logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
 
+    db_manager = DBManager()
+
     try:
-        agent_system = AgentSystem(logger=logger)
+        agent_system = AgentSystem(logger=logger, db_manager=db_manager)
     except ValueError as e:
         print(f"初期化エラー: {e}")
         print("実行前に `export GEMINI_API_KEY=あなたのキー` を設定してください。")
         return
 
     # S-2: AgentSystemのGemini感情分析器をエンジンに注入
-    engine = WorldEngine(initial_state=world_state, analyzer=agent_system.sentiment_analyzer)
+    engine = WorldEngine(initial_state=world_state, analyzer=agent_system.sentiment_analyzer, db_manager=db_manager)
 
     if args.resume:
         # 復元されたstataは前ターンの終了時（時間進行前）のものなので、ここで時間を進めて次ターンを開始する
