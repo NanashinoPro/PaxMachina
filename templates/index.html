@@ -313,6 +313,7 @@
                                     <th>軍事力</th>
                                     <th>諜報力</th>
                                     <th>教育・科学</th>
+                                    <th>税率</th>
                                     <th>支持率</th>
                                 </tr>
                             </thead>
@@ -565,6 +566,7 @@
                     <td>${Number(info.military).toFixed(1)}</td>
                     <td>${Number(info.intelligence_level || 0).toFixed(1)}</td>
                     <td>${Number(info.education_level || 0).toFixed(1)}</td>
+                    <td>${Number((info.tax_rate || 0) * 100).toFixed(1)}%</td>
                     <td>${Number(info.approval_rating).toFixed(1)}%</td>
                 `;
                 tbody.appendChild(tr);
