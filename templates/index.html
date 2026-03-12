@@ -246,12 +246,15 @@
             <div id="summary-section" class="card" style="margin-bottom: 20px;">
                 <h2>📊 シミュレーション全体のサマリー</h2>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
                     <div>
                         <canvas id="economyChart"></canvas>
                     </div>
                     <div>
                         <canvas id="militaryChart"></canvas>
+                    </div>
+                    <div>
+                        <canvas id="populationChart"></canvas>
                     </div>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 20px;">
@@ -305,9 +308,11 @@
                                 <tr>
                                     <th>国</th>
                                     <th>体制</th>
+                                    <th>人口</th>
                                     <th>経済力</th>
                                     <th>軍事力</th>
                                     <th>諜報力</th>
+                                    <th>教育・科学</th>
                                     <th>支持率</th>
                                 </tr>
                             </thead>
@@ -350,6 +355,7 @@
         let approvalChart = null;
         let intelligenceChart = null;
         let educationChart = null;
+        let populationChart = null;
         let currentSimulationFile = null;
 
         // 初期化
@@ -429,7 +435,7 @@
             if (!simulationData || simulationData.length === 0) return;
             const labels = simulationData.map(d => `T${d.turn}`);
             const countries = Object.keys(simulationData[0].world_state.countries);
-            const datasets = { economy: [], military: [], approval: [], intelligence: [] };
+            const datasets = { economy: [], military: [], approval: [], intelligence: [], population: [] };
             const colors = ['#2c3e50', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6'];
 
             countries.forEach((country, index) => {
@@ -439,6 +445,7 @@
                 const appData = simulationData.map(d => d.world_state.countries[country].approval_rating);
                 const intData = simulationData.map(d => d.world_state.countries[country].intelligence_level || 0);
                 const eduData = simulationData.map(d => d.world_state.countries[country].education_level || 0);
+                const popData = simulationData.map(d => d.world_state.countries[country].population || 0);
 
                 datasets.economy.push({ label: country, data: ecoData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
                 datasets.military.push({ label: country, data: milData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
@@ -446,6 +453,7 @@
                 datasets.intelligence.push({ label: country, data: intData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
                 datasets.education = datasets.education || [];
                 datasets.education.push({ label: country, data: eduData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
+                datasets.population.push({ label: country, data: popData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
             });
 
             const drawChart = (canvasId, title, data, existingChart) => {
@@ -463,6 +471,7 @@
             approvalChart = drawChart('approvalChart', '👍 支持率推移 (%)', datasets.approval, approvalChart);
             intelligenceChart = drawChart('intelligenceChart', '🕵️ 諜報力推移', datasets.intelligence, intelligenceChart);
             educationChart = drawChart('educationChart', '🎓 教育・科学推移', datasets.education, educationChart);
+            populationChart = drawChart('populationChart', '👥 人口推移', datasets.population, populationChart);
         }
 
         async function sendChatMessage() {
@@ -551,9 +560,11 @@
                 tr.innerHTML = `
                     <td><strong>${name}</strong><br><small style="color:#7f8c8d; display:block; max-width: 250px; line-height:1.4; margin-top:4px;">${ideologyTxt}</small></td>
                     <td>${info.government_type === 'democracy' ? '🗳️ 民主' : '👑 専制'}</td>
+                    <td>${Number(info.population || 0).toFixed(1)}</td>
                     <td>${Number(info.economy).toFixed(1)}</td>
                     <td>${Number(info.military).toFixed(1)}</td>
                     <td>${Number(info.intelligence_level || 0).toFixed(1)}</td>
+                    <td>${Number(info.education_level || 0).toFixed(1)}</td>
                     <td>${Number(info.approval_rating).toFixed(1)}%</td>
                 `;
                 tbody.appendChild(tr);
