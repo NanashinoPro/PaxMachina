@@ -1279,11 +1279,18 @@ class WorldEngine:
         new_debt = old_country.national_debt * split_ratio
         new_population = max(0.1, old_country.population * split_ratio)
         
+        # 人的インフラ（教育）の引き継ぎ（無減衰で100%引き継ぎ）
+        new_education = old_country.education_level
+        new_initial_education = old_country.initial_education_level
+        # 組織インフラ（諜報）の分割
+        new_intelligence = max(0.0, old_country.intelligence_level * split_ratio)
+        
         old_country.economy = max(1.0, old_country.economy - new_economy)
         old_country.military = max(0.5, old_country.military - new_military)
         old_country.area = max(1.0, old_country.area - new_area)
         old_country.national_debt = max(0.0, old_country.national_debt - new_debt)
         old_country.population = max(0.1, old_country.population - new_population)
+        old_country.intelligence_level = max(0.0, old_country.intelligence_level - new_intelligence)
         
         if is_overthrow:
              # 事実上の乗っ取りなので新国家が旧体制の借金を帳消し（デフォルト）にすることが多い
@@ -1306,7 +1313,10 @@ class WorldEngine:
             target_country=old_name, # 当面は旧国を強く意識
             area=new_area,
             population=new_population,
-            initial_population=new_population
+            initial_population=new_population,
+            education_level=new_education,
+            initial_education_level=max(1.0, new_initial_education), # 0割りを防ぐ
+            intelligence_level=new_intelligence
         )
         new_country.national_debt = new_debt
         if new_gov_type == GovernmentType.DEMOCRACY:
