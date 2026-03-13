@@ -2,6 +2,10 @@ import random
 import uuid
 from scipy.stats import skewnorm
 from models import CountryState, GovernmentType, WarState, DisasterEvent, BreakthroughState
+from .constants import (
+    GLOBAL_DISASTERS, NATIONAL_DISASTERS, EARTH_LAND_AREA,
+    FRAGMENTATION_BASE_INSTABILITY_MULTIPLIER, FRAGMENTATION_SIZE_FACTOR_MULTIPLIER, FRAGMENTATION_TRADE_FACTOR_MULTIPLIER
+)
 
 class EventsMixin:
     def process_pre_turn(self):
@@ -65,15 +69,8 @@ class EventsMixin:
         
         # ------------- 災害 -------------
         # 1. 世界規模災害
-        global_disasters = [
-            ("パンデミック", 0.015, 3.0, 5.0),
-            ("巨大太陽フレア", 0.008, 1.0, 10.0),
-            ("超巨大火山噴火 (VEI 7)", 0.001, 5.0, 15.0),
-            ("巨大隕石落下", 0.00001, 10.0, 50.0),      # 0.001%
-            ("破局噴火 (VEI 8)", 0.0000005, 10.0, 30.0) # 0.00005%
-        ]
         
-        for name, prob, min_dmg, max_dmg in global_disasters:
+        for name, prob, min_dmg, max_dmg in GLOBAL_DISASTERS:
             if random.random() < prob:
                 # 歪正規分布を用いてダメージを決定。a=4は正の歪み（低い値が多く、稀に高い値）
                 a = 4
@@ -93,20 +90,10 @@ class EventsMixin:
                 break # 一度に複数起きる確率は無視する（処理軽減）
                 
         # 2. 国規模災害
-        national_disasters = [
-            ("巨大地震", 0.030, 1.0, 5.0),
-            ("超大型台風/ハリケーン", 0.080, 0.5, 2.0),
-            ("大干ばつ", 0.050, 0.5, 1.5),
-            ("火山噴火 (VEI 4)", 0.154, 0.5, 1.0),
-            ("火山噴火 (VEI 5)", 0.015, 1.0, 3.0),
-            ("大噴火 (VEI 6)", 0.0025, 10.0, 20.0)
-        ]
-        
-        EARTH_LAND_AREA = 148940000.0
         
         for country_name in list(self.state.countries.keys()):
             country = self.state.countries[country_name]
-            for name, prob, min_dmg, max_dmg in national_disasters:
+            for name, prob, min_dmg, max_dmg in NATIONAL_DISASTERS:
                 actual_prob = prob
                 if "火山噴火" in name or "大噴火" in name:
                     area_ratio = country.area / EARTH_LAND_AREA
@@ -175,15 +162,15 @@ class EventsMixin:
         
         # 面積（国土規模）による多様性/異質性コスト（Alesina-Spolaore: サイズによる分裂圧力）
         # ※ここでは面積の絶対値をベースに係数をかける（最大+30%程度）
-        size_factor = min(30.0, country.area * 0.05)
+        size_factor = min(30.0, country.area * FRAGMENTATION_SIZE_FACTOR_MULTIPLIER)
         
         # 自由貿易の恩恵（Alesina-Spolaore: 貿易網が発達しているほど小国が生き返りやすいため分裂圧力増）
         # 対象国が結んでいる貿易協定の数をカウント
         trade_count = sum(1 for t in self.state.active_trades if t.country_a == country_name or t.country_b == country_name)
-        trade_factor = trade_count * 5.0 # 1つにつき+5%
+        trade_factor = trade_count * FRAGMENTATION_TRADE_FACTOR_MULTIPLIER
         
         # 分裂確率 P_frag
-        p_frag = min(100.0, (base_instability * 0.2) + size_factor + trade_factor)
+        p_frag = min(100.0, (base_instability * FRAGMENTATION_BASE_INSTABILITY_MULTIPLIER) + size_factor + trade_factor)
         
         # 民主主義の場合は武力弾圧を行わないため相対的に分裂のハードルが低い(平和的独立)
         if country.government_type == GovernmentType.DEMOCRACY:

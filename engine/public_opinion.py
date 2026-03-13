@@ -78,11 +78,13 @@ class PublicOpinionMixin:
             old_approval = country.approval_rating
             base_trend = (old_approval * WMA_HISTORY_WEIGHT) + (WMA_BASE_VALUE * WMA_BASE_WEIGHT)
             
-            # 政治疲労 ( पॉलिटिकलフｧティーグ ) による支持率の自然減衰
-            # 長期政権化するほど、国民の「飽き」や「蓄積した不満」により減衰圧力が強くなる
-            # duration 20ターンで約 -1.5、40ターンで約 -3.5 の強力なペナルティとなる
-            duration_factor = (country.regime_duration / 10.0) ** 1.2
-            
+            # 政治疲労 (Political Fatigue) による支持率の自然減衰
+            # [学術的背景] 政権の長期化に伴い、国民の「飽き」や「未解決な不満」が蓄積し、
+            # 初期の熱狂（ハネムーン期間）が失われる現象をモデリング。
+            # 指数1.2は、現実の民主国家における支持率下落トレンドへのキャリブレーションを意図し、
+            # ターンの経過とともに非線形に下落圧力が強まる設計。
+            # 例: 20ターンで約-1.5%、40ターンで約-3.5%の強力なペナルティとなる。
+            duration_factor = (country.regime_duration / 10.0) ** 1.2            
             # 従来： -0.5 - ((old_approval - 50.0) * 0.01 if old_approval > 50.0 else 0)
             # 変更： 基本的に-0.5をベースとし、長期政権ほど追加デバフ。支持率が高いほどさらに減衰ペースが上がる。
             approval_factor = ((old_approval - 50.0) * 0.03 if old_approval > 50.0 else 0)
