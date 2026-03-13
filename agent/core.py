@@ -55,17 +55,19 @@ class AgentSystem:
             
         return response
 
-    def _create_search_tool(self, country_name: str):
+    def _create_search_tool(self, country_name: str, role: str = ""):
         db_manager = getattr(self, "db_manager", None)
         
         def search_historical_events(query: str) -> str:
             """過去の重要な外交、内政、諜報に関する出来事の記録やニュースをデータベースから検索します。"""
             if not db_manager:
                 return "データベースが利用できません。"
-            self.logger.sys_log(f"[{country_name}] Tool Call: 過去の記録を検索中... (クエリ: '{query}')")
+            role_str = f":{role}" if role else ""
+            self.logger.sys_log(f"[{country_name}{role_str}] Tool Call: 過去の記録を検索中... (クエリ: '{query}')")
             try:
                 results = db_manager.search_events(searcher_country=country_name, query=query, limit=3)
                 if not results:
+                    self.logger.sys_log(f"[{country_name}{role_str}] 検索結果: 該当なし")
                     return "該当する記録は見つかりませんでした。"
                 
                 res_str = "---検索結果---\n"
@@ -73,22 +75,27 @@ class AgentSystem:
                     t = r.get("turn", "?")
                     cnt = r.get("content", "")
                     res_str += f"[Turn {t}] {cnt}\n"
+                
+                self.logger.sys_log_detail(f"[{country_name}{role_str}] Search Results", res_str)
                 return res_str
             except Exception as e:
+                self.logger.sys_log(f"[{country_name}{role_str}] 検索中にエラーが発生しました: {e}", "ERROR")
                 return f"検索中にエラーが発生しました: {e}"
         return search_historical_events if db_manager else None
 
-    def _execute_agent(self, country_name: str, role: str, prompt: str, category: str) -> str:
+    def _execute_agent(self, country_name: str, role: str, prompt: str, category: str, override_model: Optional[str] = None) -> str:
         """エージェントの推論を実行し、必要に応じて検索ツールを呼び出す"""
         start_time = time.time()
         self.logger.sys_log(f"[{country_name}:{role}] API推論開始...")
         
-        search_tool = self._create_search_tool(country_name)
+        search_tool = self._create_search_tool(country_name, role)
         tools = [search_tool] if search_tool else None
+        
+        target_model = override_model if override_model else self.model_name
 
         try:
             response = self._generate_with_retry(
-                model=self.model_name,
+                model=target_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     tools=tools,
@@ -108,7 +115,7 @@ class AgentSystem:
                         follow_up_prompt = prompt + f"\n\nエージェントツールからの検索結果 '{query}':\n{tool_result}\n\nこれらを踏まえ、最終的な意思決定を指示されたJSONフォーマットで行ってください。"
                         
                         response = self._generate_with_retry(
-                            model=self.model_name,
+                            model=target_model,
                             contents=follow_up_prompt,
                             config=types.GenerateContentConfig(temperature=0.4),
                             category=category
@@ -153,9 +160,9 @@ class AgentSystem:
         proposals = {}
         with ThreadPoolExecutor(max_workers=3) as executor:
             future_to_role = {
-                executor.submit(self._execute_agent, country_name, "外務大臣", foreign_prompt, "actions_foreign"): "foreign",
-                executor.submit(self._execute_agent, country_name, "防衛大臣", defense_prompt, "actions_defense"): "defense",
-                executor.submit(self._execute_agent, country_name, "経済内務大臣", economic_prompt, "actions_economic"): "economic"
+                executor.submit(self._execute_agent, country_name, "外務大臣", foreign_prompt, "actions_foreign", "gemini-2.5-flash"): "foreign",
+                executor.submit(self._execute_agent, country_name, "防衛大臣", defense_prompt, "actions_defense", "gemini-2.5-flash"): "defense",
+                executor.submit(self._execute_agent, country_name, "経済内務大臣", economic_prompt, "actions_economic", "gemini-2.5-flash"): "economic"
             }
             
             for future in as_completed(future_to_role):
