@@ -76,7 +76,8 @@ class AgentSystem:
                     cnt = r.get("content", "")
                     res_str += f"[Turn {t}] {cnt}\n"
                 
-                self.logger.sys_log_detail(f"[{country_name}{role_str}] Search Results", res_str)
+                self.logger.sys_log_detail(f"[{country_name}{role_str}] DB Search Result for '{query}'", res_str)
+                self.logger.sys_log(f"[{country_name}{role_str}] Tool Call: 検索完了 (クエリ: '{query}', 見つかった件数: {len(results)}件)")
                 return res_str
             except Exception as e:
                 self.logger.sys_log(f"[{country_name}{role_str}] 検索中にエラーが発生しました: {e}", "ERROR")
@@ -219,7 +220,7 @@ class AgentSystem:
 
     # Delegation methods for modules
     def run_summit(self, proposal, state_a, state_b, world_state, past_news=None) -> Tuple[str, str]:
-        return summit.run_summit(self._generate_with_retry, self.logger, proposal, state_a, state_b, world_state, past_news)
+        return summit.run_summit(self._generate_with_retry, self.logger, self.db_manager, proposal, state_a, state_b, world_state, past_news)
 
     def generate_espionage_report(self, attacker_name: str, target_name: str, target_hidden_plans: str, strategy: str) -> Tuple[str, Optional[str]]:
         return intelligence.generate_espionage_report(self._generate_with_retry, self.logger, attacker_name, target_name, target_hidden_plans, strategy)
