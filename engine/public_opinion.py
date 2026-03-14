@@ -33,7 +33,14 @@ class PublicOpinionMixin:
                         # 専制主義はネガティブな発言を検閲
                         if post_modifier < -0.3:
                             is_censored = True
-                            post_modifier = 0.0 # 支持率低下を免れる
+                            
+                            # 検閲による反発（バックラッシュ）モデル導入
+                            # [学術的背景]
+                            # 1. 心理的リアクタンス理論 (ストライサンド効果): 情報を隠蔽する行為そのものが、元の情報以上の反発を生む。
+                            # 2. 情報の非対称性とベイジアン更新: 隠された情報は「最悪の事態」と推論され、実際の不満以上に政権打撃となる。
+                            # 実装として、検閲された不満（マイナス値）の2倍をペナルティとして加算する。
+                            post_modifier = post_modifier * 2.0 
+                            
                             # 国民の投稿が検閲された場合のみフラストレーションが蓄積
                             if author == "Citizen":
                                 censored_count += 1
@@ -43,7 +50,8 @@ class PublicOpinionMixin:
                 self.sys_logs_this_turn.append(f"[{country_name} SNS] {author}: score={avg_score:+.2f} modifier={post_modifier:+.2f}{censor_tag} | {text[:50]}")
                 
                 # Leader投稿は支持率に影響させない（自己操作防止）
-                if not is_censored and author != "Leader":
+                # 検閲時はペナルティ(`post_modifier`)として作用するため、`is_censored`判定に関わらず合算する
+                if author != "Leader":
                     total_sns_modifier += post_modifier
                     
                 sns_history.append({
@@ -90,11 +98,23 @@ class PublicOpinionMixin:
             approval_factor = ((old_approval - 50.0) * 0.03 if old_approval > 50.0 else 0)
             fatigue_decay = -0.5 - duration_factor - approval_factor
             
+            import math
             # Apply dynamic factors with carefully tuned weights
-            growth_modifier = gdp_growth * 0.5
+            if gdp_growth >= 0:
+                # [学術的背景] 限界効用逓減の法則
+                # 一定以上の経済成長による支持率上昇は徐々に頭打ち（非線形）になる。
+                # 例: +5%成長で+2.5ボーナス、+20%成長でも+4.0程度に抑える。
+                if gdp_growth <= 5.0:
+                    growth_modifier = gdp_growth * 0.5
+                else:
+                    growth_modifier = 2.5 + math.log10(gdp_growth - 4.0) * 1.5
+            else:
+                growth_modifier = gdp_growth * 0.5
+                
             if gdp_growth < -5.0:
                 # 深刻な不況（5%以上のマイナス成長）には非線形なペナルティを課すが、
                 # クーデター等の直後に発生する無限死亡ループを防ぐため、1ターンのペナルティ上限を設ける
+                # 不満の非対称性 (Grievance Asymmetry) により、マイナス局面はプラス局面より強い影響力を持つ
                 penalty = (abs(gdp_growth) - 5.0) ** 1.5
                 growth_modifier -= min(30.0, penalty)
                 
