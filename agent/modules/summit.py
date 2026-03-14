@@ -9,6 +9,7 @@ from logger import SimulationLogger
 def run_summit(
     generate_func,
     logger: SimulationLogger,
+    db_manager,
     proposal: SummitProposal, 
     state_a: CountryState, 
     state_b: CountryState, 
@@ -18,35 +19,67 @@ def run_summit(
     """2国間での首脳会談（最大4ターンの対話）を実行し、(要約, 全文ログ)のタプルを返す"""
     logger.sys_log(f"[{proposal.proposer} と {proposal.target}] の首脳会談を開始 (議題: {proposal.topic})")
     
-    # 世界情勢と両国のステータスの文字列化
-    news_context = "【直近1年(4四半期)の世界のニュース】\n"
+    # 両国の関連する直近イベント（DB検索）
+    news_context = f"【両国間({proposal.proposer}と{proposal.target})に関連する直近1年(4四半期)の出来事】\n"
     has_news = False
-    if past_news:
-        for i, turn_news in enumerate(past_news):
-            t = world_state.turn - len(past_news) + i
-            if t > 0:
-                y = 2025 + (t - 1) // 4
-                q = ((t - 1) % 4) + 1
-                news_context += f"〔{y}年 第{q}四半期〕\n"
-            else:
-                news_context += "〔過去のニュース〕\n"
-            
-            if isinstance(turn_news, (list, tuple)):
-                if not turn_news:
-                    news_context += "特になし\n"
-                else:
-                    news_context += "\n".join(f"- {n}" for n in turn_news) + "\n"
-                has_news = True
-            elif turn_news:
-                news_context += f"- {turn_news}\n"
-                has_news = True
-        news_context += "\n"
-    elif world_state.news_events:
-        news_context += "\n".join(f"- {n}" for n in world_state.news_events[-20:]) + "\n\n"
-        has_news = True
+    
+    if db_manager:
+        limit_turns = 4
+        min_turn = max(1, world_state.turn - limit_turns + 1)
+        recent_events = db_manager.get_recent_events_between_countries(
+            proposal.proposer, proposal.target, world_state.turn, limit_turns=limit_turns
+        )
         
+        # システムログに検索プロセスを記録
+        log_header = f"[Summit DB Search] クエリ: '{proposal.proposer}' & '{proposal.target}' の関連イベント (Turns {min_turn}-{world_state.turn}) -> {len(recent_events)}件抽出"
+        logger.sys_log(log_header)
+        
+        if recent_events:
+            log_detail = ""
+            for ev in recent_events:
+                t = ev.get('turn', '?')
+                c = ev.get('content', '')
+                et = ev.get('event_type', '?')
+                log_detail += f"[Turn {t}] [{et}] {c}\n"
+                
+                # プロンプト用コンテキストへの追加
+                y = 2025 + (t - 1) // 4 if isinstance(t, int) else "?"
+                q = ((t - 1) % 4) + 1 if isinstance(t, int) else "?"
+                news_context += f"〔{y}年 第{q}四半期 (Turn {t})〕\n- {c}\n"
+            
+            logger.sys_log_detail("Summit DB Search Result Details", log_detail)
+            news_context += "\n"
+            has_news = True
+            
+    # DBが利用できない、またはイベントが見つからない場合のフォールバック（旧実装）
     if not has_news:
-        news_context = "【直近1年の世界のニュース】\nなし\n"
+        news_context = "【直近1年の世界のニュース】\n"
+        if past_news:
+            for i, turn_news in enumerate(past_news):
+                t = world_state.turn - len(past_news) + i
+                if t > 0:
+                    y = 2025 + (t - 1) // 4
+                    q = ((t - 1) % 4) + 1
+                    news_context += f"〔{y}年 第{q}四半期〕\n"
+                else:
+                    news_context += "〔過去のニュース〕\n"
+                
+                if isinstance(turn_news, (list, tuple)):
+                    if not turn_news:
+                        news_context += "特になし\n"
+                    else:
+                        news_context += "\n".join(f"- {n}" for n in turn_news) + "\n"
+                    has_news = True
+                elif turn_news:
+                    news_context += f"- {turn_news}\n"
+                    has_news = True
+            news_context += "\n"
+        elif world_state.news_events:
+            news_context += "\n".join(f"- {n}" for n in world_state.news_events[-20:]) + "\n\n"
+            has_news = True
+            
+        if not has_news:
+            news_context = "【両国間に関する直近1年の重要な出来事】\n特になし\n"
         
     status_a = f"経済力:{state_a.economy:.1f}, 軍事力:{state_a.military:.1f}, 支持率:{state_a.approval_rating:.1f}%"
     status_b = f"経済力:{state_b.economy:.1f}, 軍事力:{state_b.military:.1f}, 支持率:{state_b.approval_rating:.1f}%"

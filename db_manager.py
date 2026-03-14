@@ -2,7 +2,7 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, Range
 from fastembed import TextEmbedding
 
 logger = logging.getLogger(__name__)
@@ -147,6 +147,61 @@ class DBManager:
             logger.error(f"Search failed for {searcher_country}: {e}")
             return []
 
+    def get_recent_events_between_countries(self, country_a: str, country_b: str, current_turn: int, limit_turns: int = 4) -> List[Dict[str, Any]]:
+        """
+        指定された2国間で発生した直近のイベントを取得する。
+
+        Args:
+            country_a (str): 対象国A
+            country_b (str): 対象国B
+            current_turn (int): 現在のターン数
+            limit_turns (int): 何ターン前まで取得するか
+            
+        Returns:
+            List[Dict[str, Any]]: イベントのリスト（ペイロード情報のみ）
+        """
+        try:
+            # 両国が involved_countries に含まれており、かつターンが指定範囲内のものを取得
+            min_turn = max(1, current_turn - limit_turns + 1)
+            
+            filter_conditions = Filter(
+                must=[
+                    FieldCondition(
+                        key="involved_countries",
+                        match=MatchValue(value=country_a)
+                    ),
+                    FieldCondition(
+                        key="involved_countries",
+                        match=MatchValue(value=country_b)
+                    ),
+                    FieldCondition(
+                        key="turn",
+                        range=Range(gte=min_turn, lte=current_turn)
+                    )
+                ]
+            )
+            
+            # ベクトル検索ではなくScroll APIで直接条件に合うものを取得する
+            records, _ = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=filter_conditions,
+                limit=100, # 一定の余裕を持った上限
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            results = [record.payload for record in records]
+            
+            # turnの昇順にソートして返す
+            results.sort(key=lambda x: x.get("turn", 0))
+            
+            logger.info(f"[DB Search] get_recent_events_between_countries: {country_a} - {country_b} (Turns {min_turn}-{current_turn}) -> Found {len(results)} events.")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Failed to get recent events between {country_a} and {country_b}: {e}")
+            return []
+
 # 簡易的な動作確認テスト
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
@@ -167,3 +222,9 @@ if __name__ == "__main__":
     results_ger = db.search_events("ドイツ", "フランスの軍事的な動きや会談")
     for r in results_ger:
         print(f"Turn {r['turn']} [{r['event_type']}]: {r['content']} (Private: {r['is_private']})")
+
+    print("\n--- フランスとイギリスの直近4ターンのイベント (Turn 2時点) ---")
+    results_fr_uk = db.get_recent_events_between_countries("フランス", "イギリス", 2, limit_turns=4)
+    for r in results_fr_uk:
+        print(f"Turn {r['turn']} [{r['event_type']}]: {r['content']} (Private: {r['is_private']})")
+
