@@ -186,10 +186,19 @@ class DomesticMixin:
         
         I *= breakthrough_multiplier
 
-        # 次ターンのGDP(Y)の暫定算出 = C + I + G + NX
-        # 教育・科学投資による人的資本バフの適用 (弾力性モデル: Y = (C + I + G) * (H / H0)^alpha + NX)
+        # 教育・科学投資による人的資本バフの適用 (限界効用逓減モデル: Y = (C + I + G) * f(H) + NX)
         # H0(initial_education_level)は開始時の絶対額。比率をとることで単位依存を解消
-        h_ratio = country.education_level / max(1.0, country.initial_education_level)
+        base_h_ratio = country.education_level / max(1.0, country.initial_education_level)
+        
+        # [学術的背景: 人的資本の収穫逓減 (Mankiw, Romer, and Weil 1992)]
+        # 教育水準が初期値から大きく上昇した場合、追加的な教育投資によるGDPへの波及効果は逓減する。
+        # 単純な比率(h_ratio)ではなく、対数関数を適用してバブル的な超指数関数的成長を抑制する。
+        # 1.0未満の場合はペナルティが生じないよう調整。
+        if base_h_ratio > 1.0:
+            h_ratio = 1.0 + math.log1p(base_h_ratio - 1.0) * 1.5  # 成長を緩やかにする係数
+        else:
+            h_ratio = max(0.5, base_h_ratio) # 極端な崩壊を防ぐ下限
+
         new_gdp_provisional = (C + I + G) * (h_ratio ** EDUCATION_GDP_ALPHA) + country.last_turn_nx
         
         # 災害ダメージは当期の経済から直接引く（巨大な資本破壊）
