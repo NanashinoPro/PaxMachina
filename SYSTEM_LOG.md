@@ -828,3 +828,4 @@ LLMの機嫌次第で `domestic_policy` の各投資割合の合計が `1.0` を
 
 3ターンのテストシミュレーションを実行し、正常に完了したことを確認済みです。システムは正常に稼働しています、ボス。
 \n## 2026-03-14: 支持率100%問題の解消と学術モデル実装\n- 中国等の専制主義国家における「支持率100%への張り付きバグ」を解消。\n- 心理的リアクタンス理論に基づき、SNSの不満発言を検閲した場合、元の不満度（マイナススコア）の2倍のペナルティを支持率（SNS世論値）に加算する「バックラッシュ・モデル」を実装。\n- 経済投票論における限界効用逓減の法則に従い、極端なGDP成長率による支持率ボーナス（+5%以上）に非線形な対数キャップを設定し、無限の支持拡大を防止。
+\n## 2026-03-14 11:36 - Qdrant Database Separation Fix\n- **Objective**: Prevent simulation history leaks to Qdrant searches in subsequent runs.\n- **Action**: Modified `main.py` to pass `collection_name=f"diplomacy_events_{logger.session_id}"` to `DBManager` initialization. This ensures every simulation creates an isolated collection under `db/collection/diplomacy_events_{session_id}/`.\n- **Result**: Confirmed isolation via 3-turn test simulation (Session `20260314_112455`). Search results only returned the events occurring during the active run.

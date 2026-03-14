@@ -108,7 +108,7 @@ def main():
         logger = SimulationLogger()
         logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
 
-    db_manager = DBManager()
+    db_manager = DBManager(collection_name=f"diplomacy_events_{logger.session_id}")
 
     try:
         agent_system = AgentSystem(logger=logger, db_manager=db_manager)
