@@ -436,18 +436,29 @@
         function renderCharts() {
             if (!simulationData || simulationData.length === 0) return;
             const labels = simulationData.map(d => `T${d.turn}`);
-            const countries = Object.keys(simulationData[0].world_state.countries);
+            
+            // 全ターンから重複なく全国家名を抽出
+            const countrySet = new Set();
+            simulationData.forEach(d => {
+                if (d.world_state && d.world_state.countries) {
+                    Object.keys(d.world_state.countries).forEach(c => countrySet.add(c));
+                }
+            });
+            const countries = Array.from(countrySet);
+            
             const datasets = { economy: [], military: [], approval: [], intelligence: [], population: [] };
-            const colors = ['#2c3e50', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6'];
+            const colors = ['#2c3e50', '#e74c3c', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#34495e'];
 
             countries.forEach((country, index) => {
                 const color = colors[index % colors.length];
-                const ecoData = simulationData.map(d => d.world_state.countries[country].economy);
-                const milData = simulationData.map(d => d.world_state.countries[country].military);
-                const appData = simulationData.map(d => d.world_state.countries[country].approval_rating);
-                const intData = simulationData.map(d => d.world_state.countries[country].intelligence_level || 0);
-                const eduData = simulationData.map(d => d.world_state.countries[country].education_level || 0);
-                const popData = simulationData.map(d => d.world_state.countries[country].population || 0);
+                
+                // データが存在しないターンはnullを返す
+                const ecoData = simulationData.map(d => d.world_state.countries[country] ? d.world_state.countries[country].economy : null);
+                const milData = simulationData.map(d => d.world_state.countries[country] ? d.world_state.countries[country].military : null);
+                const appData = simulationData.map(d => d.world_state.countries[country] ? d.world_state.countries[country].approval_rating : null);
+                const intData = simulationData.map(d => d.world_state.countries[country] ? (d.world_state.countries[country].intelligence_level || 0) : null);
+                const eduData = simulationData.map(d => d.world_state.countries[country] ? (d.world_state.countries[country].education_level || 0) : null);
+                const popData = simulationData.map(d => d.world_state.countries[country] ? (d.world_state.countries[country].population || 0) : null);
 
                 datasets.economy.push({ label: country, data: ecoData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
                 datasets.military.push({ label: country, data: milData, borderColor: color, fill: false, tension: 0.1, pointRadius: 0 });
