@@ -9,7 +9,7 @@ from .constants import (
     DEBT_INTEREST_RATE, TAX_APPROVAL_PENALTY_MULTIPLIER, TAX_REDUCTION_APPROVAL_BONUS_MULTIPLIER, MAX_TAX_CHANGE_PER_TURN,
     AUTHORITARIAN_BASE_SAVING_RATE, DEMOCRACY_BASE_SAVING_RATE,
     DEBT_REPAYMENT_CROWD_IN_MULTIPLIER, GOVERNMENT_CROWD_IN_MULTIPLIER, GOVERNMENT_CROWD_OUT_MULTIPLIER,
-    EDUCATION_GDP_ALPHA, DEBT_TO_GDP_PENALTY_THRESHOLD,
+    ENDOGENOUS_GROWTH_ALPHA, DEBT_TO_GDP_PENALTY_THRESHOLD,
     BASE_MILITARY_MAINTENANCE_ALPHA, MAX_MILITARY_FATIGUE_ALPHA, BASE_MILITARY_GROWTH_RATE,
     INTEL_GROWTH_RATE, INTEL_MAINTENANCE_ALPHA,
     EDUCATION_GROWTH_RATE, EDUCATION_MAINTENANCE_ALPHA
@@ -186,20 +186,31 @@ class DomesticMixin:
         
         I *= breakthrough_multiplier
 
-        # 教育・科学投資による人的資本バフの適用 (限界効用逓減モデル: Y = (C + I + G) * f(H) + NX)
-        # H0(initial_education_level)は開始時の絶対額。比率をとることで単位依存を解消
+        # --- 教育・科学投資による人的資本の限界効用逓減 (Mankiw, Romer, and Weil 1992) ---
+        # H0(initial_education_level)に対する比率。単位依存を解消。
         base_h_ratio = country.education_level / max(1.0, country.initial_education_level)
         
-        # [学術的背景: 人的資本の収穫逓減 (Mankiw, Romer, and Weil 1992)]
-        # 教育水準が初期値から大きく上昇した場合、追加的な教育投資によるGDPへの波及効果は逓減する。
-        # 単純な比率(h_ratio)ではなく、対数関数を適用してバブル的な超指数関数的成長を抑制する。
-        # 1.0未満の場合はペナルティが生じないよう調整。
+        # 物理的なインフレ上限の設定
+        # log2を使うことで、指数関数的成長に対して強力にブレーキをかけ、実質的なシステムキャップとする
+        # 例: ratio=2で+5%, ratio=4で+10%, ratio=32(3200%)でようやく+25%
         if base_h_ratio > 1.0:
-            h_ratio = 1.0 + math.log1p(base_h_ratio - 1.0) * 1.5  # 成長を緩やかにする係数
+            h_ratio_capped = 1.0 + math.log2(base_h_ratio) * 0.05
         else:
-            h_ratio = max(0.5, base_h_ratio) # 極端な崩壊を防ぐ下限
+            h_ratio_capped = max(0.5, base_h_ratio)
 
-        new_gdp_provisional = (C + I + G) * (h_ratio ** EDUCATION_GDP_ALPHA) + country.last_turn_nx
+        # マクロ需要ベースライン (C+I+G 全体に強力なキャップをかけた教育バフを乗ずる)
+        base_aggregated_demand = (C + I + G) * h_ratio_capped
+
+        # --- 内生的成長理論 (Romer model) によるイノベーション効果 ---
+        # そのターンの教育・科学投資(g_edu)がGDPに対して占める割合が、技術進歩（基礎成長率）を押し上げる
+        edu_investment_ratio = g_edu / max(1.0, old_gdp)
+        
+        # 成長率バフへの変換式。対数を用いて異常な投資への耐性を持たせる
+        # 例: 投資率0.05(5%)投入 -> log1p(0.5)*0.05 = 約2.0%の追加成長
+        endogenous_growth_bonus = math.log1p(edu_investment_ratio * 10.0) * ENDOGENOUS_GROWTH_ALPHA
+
+        # 総需要に内生的な技術進歩を掛け合わせ、純輸出を足して新GDPを算出
+        new_gdp_provisional = base_aggregated_demand * (1.0 + endogenous_growth_bonus) + country.last_turn_nx
         
         # 災害ダメージは当期の経済から直接引く（巨大な資本破壊）
         if disaster_damage_sum > 0:

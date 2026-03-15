@@ -851,3 +851,19 @@ LLMの機嫌次第で `domestic_policy` の各投資割合の合計が `1.0` を
     3. 数値が現実的な範囲に収束し、ハイパーインフレが抑制されたことをシステムログ（`logs/system/system_20260314_213911.log`）で確認完了。
 - [2026-03-15 20:21:52] 固定された国家数に基づくグラフ描画から、全ターンを走査して動的に国家を取得し、途中で建国・滅亡した国家にも対応できるよう templates/index.html を修正。
 - [2026-03-15 20:26:31] main.pyの--resume実行時に要約ファイルが既に存在する場合、スキップされてしまう問題を修正。summarizer.pyに--forceオプションを追加し、main.pyからは強制的に再生成を行うよう修正。
+
+
+## [System Event] Hybrid Macroeconomic Growth Model Update
+**Date:** 2026-03-15 22:14:44
+
+### Update Log:
+Resolved the hyper-exponential growth issue in the simulation engine. The previous logic multiplied the entire aggregate demand (C+I+G) by the exponentially growing human capital ratio, essentially creating a compounding interest that scaled infinitely on itself, causing GDP values to hit factors of 20,000x over 80 turns.
+
+**Changes applied:**
+1.  **Mankiw-Romer-Weil constraint:** Limited the foundational scaling impact of human capital on C+I+G by replacing power scaling with a hard log2 limit to prevent infinite expansion.
+2.  **Romer Endogenous Growth implementation:** Extracted the core benefits of the science and education investment and converted it into a basic endogenous addition to GDP *growth rate* (1.0 + bonus) rather than an absolute GDP *multiplier*.
+3.  **Constants update:** Replaced `EDUCATION_GDP_ALPHA` with `ENDOGENOUS_GROWTH_ALPHA` at 0.05 in `constants.py`.
+4.  Verified stability with a 3-turn test simulation showing steady numbers rather than uncontrolled explosion.
+
+**AI Context Output:**
+"学術的に最も現実世界を反映している数理モデルはどれですか？" に応え、物理資本の限界効用逓減が働く「MRWモデル」と、長期投資の複利を生む「内生的成長理論（Romerモデル）」のハイブリッドエンジンを組み込みました、ボス。これによりバブル崩壊ならぬ宇宙膨張を無事に阻止しました。

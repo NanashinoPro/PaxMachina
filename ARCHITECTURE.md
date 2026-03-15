@@ -138,9 +138,9 @@ $$ \Delta Approval = +(|\Delta TaxRate| \times 100.0) $$
 4.  **経済成長：人的資本（教育・科学）と内生的成長**:
     *   本シミュレーションは、教育・人的資本レベル（$H$）を経済成長の「増幅係数」として定義している。
     ### マクロ経済モデル (SNAベース)
-GDPの決定式は、支出側から見た恒等式をベースに、供給側の人的資本（Human Capital）による技術進歩（TFP）を乗算した形式を採用しています。
+GDPの決定式は、限界効用逓減を伴うMankiw-Romer-Weil型の教育バフと、Romer型の内生的成長（基本成長率のアドオン）のハイブリッド形式を採用しています。
 
-$$Y_t = (C + I + G) \times \left(1 + \min(0.3, \log_{10}\left(\max(1.0, \frac{H_t}{H_{initial}})\right) \times \alpha)\right) + NX$$
+$$Y_t = (C + I + G) \times H_{capped} \times (1 + Growth_{endogenous}) + NX$$
 
 - $Y$: 実質GDP
 - $C$: 民間消費 ($C = Y \times (1 - 税率) \times (1 - 貯蓄率)$)
@@ -149,7 +149,9 @@ $$Y_t = (C + I + G) \times \left(1 + \min(0.3, \log_{10}\left(\max(1.0, \frac{H_
 - $NX$: 純輸出 (他国との貿易収支)
 - $H_t$: 現在の人的資本レベル
 - $H_{initial}$: シミュレーション開始時の人的資本レベル
-- $\alpha$: 人的資本の産出弾力性 (EDUCATION_GDP_ALPHA = 0.1)
+- $H_{capped}$: 物理的なインフレ上限を持つ人的資本バフ ($1.0 + \log_2(\max(1.0, \frac{H_t}{H_{initial}})) \times 0.05$)
+- $Growth_{endogenous}$: 教育・科学投資比率による内生的追加成長率 ($\log_{1p}(\frac{G_{edu}}{Y_{t-1}} \times 10.0) \times \alpha_{endo}$)
+- $\alpha_{endo}$: 内生的成長ボーナス係数 (ENDOGENOUS_GROWTH_ALPHA = 0.05)
 
 #### 投資による人的資本（H）の更新
 $$H_t = H_{t-1} \times (1 - 0.015) + (G_{edu} \times 0.05)$$
@@ -158,13 +160,13 @@ $$H_t = H_{t-1} \times (1 - 0.015) + (G_{edu} \times 0.05)$$
 - 0.05: 投資の効率
 
 > [!NOTE]
-> 以前のモデルでは $H^\alpha$ を直接乗算していましたが、絶対額への依存と複利的な暴走を避けるため、初期値 $H_{initial}$ で規格化し、さらに**対数減衰モデルによるキャップ**（上限+30%のバフまで）へ刷新されました。
+> 以前のモデルでは $H^\alpha$ を直接乗算していましたが、絶対額への依存と複利的な暴走（超指数関数的成長）を避けるため、Mankiw-Romer-Weilモデルの限界効用逓減（厳格な対数上限バフ）と、内生的成長理論（成長率への加算）を組み合わせたハイブリッド・モデルへ刷新されました。
     *   **初期値設定（R&D支出絶対額ベース）**: 最新のR&D支出統計（公称10億ドル単位）を初期 $H$ として採用。
         *   **アメリカ**: **940.0** (2023年実績値)
         *   **中国**: **460.0** (2023年実績値)
-    *   人的資本ストック $H$ の更新: $H_{t} = (H_{t-1} \times (1 - 0.01)) + (G_{edu} \times 0.05)$
-        *   `EDUCATION_GROWTH_RATE = 0.05`, `EDUCATION_MAINTENANCE_ALPHA = 0.01`, `EDUCATION_GDP_ALPHA = 0.01`
-        *   最新の人的資本レベル $H$ がGDP産出の効率を押し上げる。
+    *   人的資本ストック $H$ の更新: $H_{t} = (H_{t-1} \times (1 - 0.015)) + (G_{edu} \times 0.05)$
+        *   `EDUCATION_GROWTH_RATE = 0.05`, `EDUCATION_MAINTENANCE_ALPHA = 0.015`, `ENDOGENOUS_GROWTH_ALPHA = 0.05`
+        *   最新の人的資本レベル $H$ がGDP産出の効率と成長率を押し上げる。
 5.  **国家債務と経済ペナルティ**:
     *   `DEBT_TO_GDP_PENALTY_THRESHOLD = 1.0` (債務の対GDP比100%)
     *   国家累積債務がGDPの100%を超過した場合、過剰な利払い負担による警告（システムログへの記録）が行われる。※以前存在したGDP成長率への直接的なマイナス補正（強制最大5%カット）は、利払いとの二重ペナルティになっていたため廃止された。
