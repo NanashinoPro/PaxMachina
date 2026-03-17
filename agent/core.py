@@ -3,12 +3,13 @@ import json
 import traceback
 import time
 from typing import Dict, Any, List, Tuple, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+from agent.ollama_client import OllamaClient
 
 from models import WorldState, CountryState, AgentAction, DomesticAction
 from logger import SimulationLogger
@@ -38,10 +39,28 @@ class AgentSystem:
         self.model_name = model_name
         self.sentiment_analyzer = GeminiSentimentAnalyzer(self.client)
         self.token_usage = {}
+        
+        # Ollamaクライアントの初期化
+        try:
+            self.ollama_client = OllamaClient()
+            self.logger.sys_log("[System] Ollamaクライアント初期化完了 (mistral-small3.1)")
+        except ConnectionError as e:
+            self.logger.sys_log(f"[System] Ollamaクライアント初期化エラー: {e}", "ERROR")
+            self.ollama_client = None
 
     @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _generate_with_retry(self, model: str, contents: str, config: types.GenerateContentConfig = None, category: str = "default") -> Any:
-        if config:
+        # Mistral Small (Ollama) への自動ルーティング
+        if model.startswith("mistral-small") and self.ollama_client:
+            json_mode = config and hasattr(config, 'response_mime_type') and getattr(config, 'response_mime_type', None) == "application/json"
+            temperature = getattr(config, 'temperature', 0.4) if config else 0.4
+            response = self.ollama_client.generate(
+                prompt=contents,
+                model=model,
+                temperature=temperature,
+                json_mode=json_mode,
+            )
+        elif config:
             response = self.client.models.generate_content(model=model, contents=contents, config=config)
         else:
             response = self.client.models.generate_content(model=model, contents=contents)
@@ -153,30 +172,27 @@ class AgentSystem:
     def _decide_country_action(self, country_name: str, country_state: CountryState, world_state: WorldState, past_news: List[str] = None) -> AgentAction:
         """閣僚エージェントと大統領エージェントを用いた2段階の意思決定を行う"""
         
-        # フェーズ1: 3大臣によるプロポーザルの並行生成
+        # フェーズ1: 3大臣によるプロポーザルの逐次生成（メモリ使用量削減のため並列実行を廃止）
         foreign_prompt = build_foreign_minister_prompt(country_name, country_state, world_state, past_news)
         defense_prompt = build_defense_minister_prompt(country_name, country_state, world_state, past_news)
         economic_prompt = build_economic_minister_prompt(country_name, country_state, world_state, past_news)
 
         proposals = {}
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            future_to_role = {
-                executor.submit(self._execute_agent, country_name, "外務大臣", foreign_prompt, "actions_foreign", "gemini-2.5-flash"): "foreign",
-                executor.submit(self._execute_agent, country_name, "防衛大臣", defense_prompt, "actions_defense", "gemini-2.5-flash"): "defense",
-                executor.submit(self._execute_agent, country_name, "経済内務大臣", economic_prompt, "actions_economic", "gemini-2.5-flash"): "economic"
-            }
-            
-            for future in as_completed(future_to_role):
-                role = future_to_role[future]
-                try:
-                    result = future.result()
-                    proposals[role] = result
-                    self.logger.sys_log_detail(f"{country_name} Minister Proposal ({role})", result)
-                except Exception as exc:
-                    self.logger.sys_log(f"[{country_name}:{role}] 並列推論中に例外発生: {exc}", "ERROR")
-                    proposals[role] = "{}"
+        minister_tasks = [
+            ("外務大臣", foreign_prompt, "actions_foreign", "foreign"),
+            ("防衛大臣", defense_prompt, "actions_defense", "defense"),
+            ("経済内務大臣", economic_prompt, "actions_economic", "economic"),
+        ]
+        for role_name, prompt, category, key in minister_tasks:
+            try:
+                result = self._execute_agent(country_name, role_name, prompt, category, "gemini-2.5-flash")
+                proposals[key] = result
+                self.logger.sys_log_detail(f"{country_name} Minister Proposal ({key})", result)
+            except Exception as exc:
+                self.logger.sys_log(f"[{country_name}:{role_name}] 推論中に例外発生: {exc}", "ERROR")
+                proposals[key] = "{}"
 
-        # フェーズ2: 大統領による最終決定
+        # フェーズ2: 大統領による最終決定 (gemini-2.5-pro)
         president_prompt = build_president_prompt(
             country_name, 
             country_state, 
