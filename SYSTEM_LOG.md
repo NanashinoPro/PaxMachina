@@ -1,5 +1,21 @@
 # System Log
 
+## 2026-03-17 17:40:00 - Mistral Small 3.1 移行のリバート（モデル→Gemini API復元、逐次実行のみ維持）
+- **修正内容**: Mistral Small 3.1（Ollama経由）への移行をリバート。ローカルの24Bモデル推論が1リクエストあたり3-5分かかり、40ターンでは約26時間を要するため非現実的と判断。モデルを全てGemini API（Flash/Flash-Lite）に戻し、**大臣エージェントの逐次実行（外務→防衛→経済内務）のみ維持**。
+- **残されたもの**: `agent/ollama_client.py` はOllamaクライアント実装として参考用に残す（使用はされない）。ARM版Homebrew（`/opt/homebrew/bin/ollama`）優先ロジック、ストリーミングモード対応済み。
+- **教訓**: 24Bパラメータモデル（15GB Q4_K_M）をApple M4 Metal GPU（25GB VRAM）で動かしても、大臣プロンプト（数千トークン）の推論に3-5分かかる。Ollamaの非ストリーミングリクエストには5分のハードコードタイムアウトがあり、ストリーミングへの切り替えが必要。Intel版Homebrewとの混在に注意（`/usr/local/bin/ollama` = x86_64、GPU非使用）。
+
+## 2026-03-17 16:15:00 - Gemini Flash → Mistral Small 3.1 (Ollama) 移行 & 大臣エージェント逐次実行化
+- **修正内容**: APIコスト削減とメモリ使用量削減のため、`gemini-2.5-flash` および `gemini-2.5-flash-lite` で実行されていたすべてのタスクを、ローカルで動作する `Mistral Small 3.1`（Ollama経由）に移行。同時に、大臣エージェント（外務・防衛・経済内務）の並列実行（`ThreadPoolExecutor`）を逐次実行に変更。
+- **変更対象外**: 大統領（`gemini-2.5-pro`）、首脳会談（`gemini-2.5-pro`）、サマリー生成（`gemini-2.5-flash`）は変更なし。
+- **実装詳細**:
+    - `agent/ollama_client.py` [NEW]: Ollama REST API (`http://localhost:11434/api/generate`) クライアントを新規作成。`google-genai`互換のレスポンスラッパー（`OllamaResponse`）、自動起動機能（`ensure_ollama_running`）、リトライロジック（`tenacity`）を内蔵。
+    - `agent/core.py`: `_generate_with_retry`にモデル名による自動ルーティング（`mistral-small`→Ollama、それ以外→Gemini API）を追加。`ThreadPoolExecutor(max_workers=3)`による並列実行を廃止し、forループによる逐次実行に変更。
+    - `agent/modules/media.py`: 全関数のモデル指定を`mistral-small3.1`に変更。`GeminiSentimentAnalyzer`もOllama経由に対応。
+    - `agent/modules/intelligence.py`: `gemini-2.5-flash` → `mistral-small3.1`に変更。
+    - `main.py`: コスト計算にMistral Small（$0.00、ローカル実行）を追加。
+    - `ARCHITECTURE.md` §1.2: LLMモデルのタスク割り当てをMistral Small 3.1ベースの構成に更新。
+
 ## 2026-03-14 11:00:00 - 首脳会談の直近ニュースDB検索化対応
 - **修正内容**: 従来、首脳会談のプロンプトにおいて全世界のニュースイベントがハードコーディングで渡されていた仕組みを廃止し、Qdrantベクトルデータベースの検索機能（`get_recent_events_between_countries`）を用いて「会談する2国間で発生した直近4ターンのイベント」のみを動的に抽出してプロンプトへ注入するよう改修しました。
 - **実装詳細**:

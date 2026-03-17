@@ -7,7 +7,7 @@ from models import WorldState, CountryState, AgentAction, GovernmentType
 from logger import SimulationLogger
 
 class GeminiSentimentAnalyzer:
-    """Gemini API (gemini-2.0-flash-lite) を用いた感情分析器"""
+    """Gemini API (gemini-2.5-flash-lite) を用いた感情分析器"""
     SENTIMENT_MODEL = "gemini-2.5-flash-lite"
     
     def __init__(self, client):
