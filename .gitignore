@@ -1,5 +1,19 @@
-.venv*
-.agents
-__pycache__
+# Python
+.venv*/
+__pycache__/
+
+# Environment variables
 .env
-db/collection/*
+
+# IDE & OS
+.agents/
+*.DS_Store
+
+# Runtime data (simulation logs, database)
+logs/
+db/
+
+# Internal development files
+SYSTEM_LOG.md
+TODO.md
+stats_sequence.txt
