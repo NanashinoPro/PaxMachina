@@ -183,6 +183,34 @@ def main():
     # シミュレーションループ
     MAX_TURNS = args.turns
     past_news_queue = []
+
+    # ideologyが空の国家に初期ideologyを生成（CSV空欄→首脳エージェントが自律記述）
+    empty_ideology_countries = [
+        (name, state) for name, state in world_state.countries.items()
+        if not state.ideology or not state.ideology.strip()
+    ]
+    if empty_ideology_countries:
+        print(f"\n🔄 {len(empty_ideology_countries)}つの国家にイデオロギー（国家目標）を生成中...")
+        for country_name, country_state in empty_ideology_countries:
+            try:
+                if country_state.government_type == GovernmentType.DEMOCRACY:
+                    new_ideology = agent_system.generate_ideology_democracy(
+                        country_name, country_state, world_state, []
+                    )
+                else:
+                    new_ideology = agent_system.generate_ideology_authoritarian(
+                        country_name, country_state, world_state
+                    )
+                country_state.ideology = new_ideology
+                logger.sys_log(f"[{country_name}] 初期イデオロギーを生成: {new_ideology}")
+                print(f"  ✅ {country_name}: {new_ideology[:60]}...")
+            except Exception as e:
+                # フォールバック: デフォルトのideologyを設定
+                fallback = "国家の安定と繁栄を追求する" if country_state.government_type == GovernmentType.DEMOCRACY else "国家体制の維持と発展を推進する"
+                country_state.ideology = fallback
+                logger.sys_log(f"[{country_name}] イデオロギー生成失敗、フォールバック使用: {e}", "WARNING")
+                print(f"  ⚠️ {country_name}: フォールバック使用 ({fallback})")
+        print()
     
     for _ in range(MAX_TURNS):
         # 1. ターン開始時のシステム内政判定（選挙・クーデター）

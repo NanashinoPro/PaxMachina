@@ -1,3 +1,3 @@
 name,government_type,ideology,economy,military,intelligence_level,area,approval_rating,turns_until_election,rebellion_risk,press_freedom,education_level,population
-アメリカ,democracy,"自由民主主義体制の維持、同盟国との連携による覇権維持、経済的優位の確保",25000.0,850.0,100.0,9833517.0,55.0,16,,0.6549,940.0,340.0
-中国,authoritarian,"国家主導による急速な経済・軍事の発展、既存の世界秩序の変更と覇権の奪取",18000.0,306.0,90.0,9596960.0,70.0,,5.0,0.2241,460.0,1410.0
+アメリカ,democracy,,25000.0,850.0,100.0,9833517.0,55.0,16,,0.6549,940.0,340.0
+中国,authoritarian,,18000.0,306.0,90.0,9596960.0,70.0,,5.0,0.2241,460.0,1410.0
