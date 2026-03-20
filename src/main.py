@@ -199,6 +199,19 @@ def main():
             logger = SimulationLogger()
             logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
             logger.sys_log(f"[Resume] ターン {args.resume_turn} の状態から再開 (元ファイル: {args.resume})")
+            
+            # 元ファイルから指定ターンまでのデータを新しいJONLファイルにコピー
+            with open(args.resume, "r", encoding="utf-8") as src:
+                with open(logger.sim_log_file, "w", encoding="utf-8") as dst:
+                    copied = 0
+                    for line in src:
+                        data = json.loads(line)
+                        if data["turn"] <= args.resume_turn:
+                            dst.write(line)
+                            copied += 1
+                    dst.flush()
+                    os.fsync(dst.fileno())
+            print(f"📋 元ファイルからターン 1〜{args.resume_turn} のデータ（{copied}行）を新しいログにコピーしました。")
         else:
             # 従来の --resume: 同じセッションに追記
             filename = os.path.basename(args.resume)
