@@ -261,6 +261,15 @@ def main():
                 logger.display_category_events(ideology_updates, "イデオロギー再構築", style="bold blue", icon="🔄")
         
         # 5. 各AIエージェントによる行動の決定（API呼び出し）
+        # Agent呼出し前に政府予算を事前計算（process_turn内でも再計算されるが、
+        # Agentプロンプトに正しい予算値を渡すために必要）
+        DEBT_INTEREST_RATE = 0.01
+        for country_name, country in world_state.countries.items():
+            tax_revenue = country.economy * country.tax_rate
+            interest_payment = country.national_debt * DEBT_INTEREST_RATE
+            total_revenue = tax_revenue + country.tariff_revenue
+            country.government_budget = max(0.0, total_revenue - interest_payment)
+
         print("\n⏳ 首脳AIが状況を分析し、行動を決定しています...")
         actions = agent_system.generate_actions(world_state, past_news=past_news_queue)
         
