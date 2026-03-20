@@ -101,8 +101,10 @@ class DiplomaticAction(BaseModel):
     summit_topic: Optional[str] = Field(None, description="首脳会談で議論したい議題（提案または受諾時のみ記載）")
     
     # 対外援助 (Foreign Aid)
-    aid_amount_economy: float = Field(0.0, ge=0.0, description="対象国に対する民生・インフラへの経済支援額（自国の政府予算から拠出）")
-    aid_amount_military: float = Field(0.0, ge=0.0, description="対象国に対する兵器・軍事物資の軍事支援額（自国の政府予算から拠出）")
+    aid_amount_economy: float = Field(0.0, ge=0.0, description="対象国に対する民生・インフラへの経済支援額（自国の政府予算から拠出。翌ターンに相手国が受入判断する）")
+    aid_amount_military: float = Field(0.0, ge=0.0, description="対象国に対する兵器・軍事物資の軍事支援額（自国の政府予算から拠出。翌ターンに相手国が受入判断する）")
+    # 対外援助の受入制御（前ターンに相手国から申請された援助に対して受入率を設定）
+    aid_acceptance_ratio: float = Field(1.0, ge=0.0, le=1.0, description="対象国からの援助申請に対する受入率（0.0〜1.0の連続値。実際の申請額を確認した上で戦略的に判断する。例: 0.0=全拒否、0.3=3割のみ受入、1.0=全額受入。デフォルト1.0=全額受入）")
     
     reason: str = Field(..., max_length=50, description="この外交決定の簡潔な理由（30文字以内厳守）")
 
@@ -151,6 +153,13 @@ class AnnexationProposal(BaseModel):
     proposer: str = Field(..., description="統合（吸収）を提案した国")
     target: str = Field(..., description="提案された（吸収される）国")
 
+class PendingAidProposal(BaseModel):
+    """保留中の対外援助の申請（翌ターンに受取国が受入判断する）"""
+    donor: str = Field(..., description="援助元の国名")
+    target: str = Field(..., description="援助先の国名")
+    amount_economy: float = Field(0.0, ge=0.0, description="経済援助申請額")
+    amount_military: float = Field(0.0, ge=0.0, description="軍事援助申請額")
+
 class BreakthroughState(BaseModel):
     """技術革新（GPTs）の進行状態"""
     origin_country: str = Field(..., description="技術革新が発生した国")
@@ -182,6 +191,7 @@ class WorldState(BaseModel):
     pending_summits: List[SummitProposal] = Field(default_factory=list, description="前ターンに提案された首脳会談のリスト")
     pending_alliances: List[AllianceProposal] = Field(default_factory=list, description="前ターンに提案された同盟のリスト（相互合意メカニズム）")
     pending_annexations: List[AnnexationProposal] = Field(default_factory=list, description="前ターンに提案された平和的統合のリスト")
+    pending_aid_proposals: List[PendingAidProposal] = Field(default_factory=list, description="前ターンに申請された対外援助のリスト（翌ターンに受取国が受入判断する）")
     active_breakthroughs: List[BreakthroughState] = Field(default_factory=list, description="現在進行中の技術革新")
     disaster_history: List[DisasterEvent] = Field(default_factory=list, description="過去に発生した重大災害の履歴")
     

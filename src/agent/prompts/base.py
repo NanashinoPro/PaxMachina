@@ -56,6 +56,16 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
             my_info += f"{pmsg}\n"
         my_info += "（※これらは第三国には一切見えない非公開情報です）\n\n"
 
+    # 保留中の援助申請（翌ターン承認制）
+    pending_aids_for_me = [p for p in world_state.pending_aid_proposals if p.target == country_name]
+    if pending_aids_for_me:
+        my_info += "---💰【保留中の援助申請（要承認）】💰---\n"
+        my_info += "以下の国から援助の申し出があります。diplomatic_policiesの該当国に対して `aid_acceptance_ratio`（0.0〜1.0）を設定し、受入率を決定してください。\n"
+        my_info += "（デフォルト1.0=全額受入。0.0=全拒否。0.3=3割のみ受入等。依存度の上昇や戦略的リスクを考慮して判断してください）\n"
+        for p in pending_aids_for_me:
+            my_info += f"  - {p.donor}: 経済援助 {p.amount_economy:.1f}, 軍事援助 {p.amount_military:.1f}\n"
+        my_info += "\n"
+
     my_info += f"あなたの脳内（非公開の計画など）には次のような情報があります: '{country_state.hidden_plans}'\n\n"
     
     my_info += "---🗄️【国家情報局(RAG) 過去の重要記録アクセス機能】🗄️---\n"

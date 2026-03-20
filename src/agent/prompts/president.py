@@ -59,6 +59,7 @@ def build_president_prompt(country_name: str, country_state: CountryState, world
       "accept_summit": bool,
       "aid_amount_economy": 0.0,
       "aid_amount_military": 0.0,
+      "aid_acceptance_ratio": 1.0,
       "espionage_gather_intel": bool,
       "espionage_intel_strategy": "手段",
       "reasoning_for_sabotage": "工作の考察",
