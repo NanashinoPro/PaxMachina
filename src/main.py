@@ -39,6 +39,8 @@ def initialize_world() -> WorldState:
                 initial_education_level=float(row["education_level"]),
                 population=float(row["population"]),
                 initial_population=float(row["population"]),
+                capital_lat=float(row.get("capital_lat", 0.0) or 0.0),
+                capital_lon=float(row.get("capital_lon", 0.0) or 0.0),
                 hidden_plans=""
             )
 
@@ -76,7 +78,12 @@ def initialize_world() -> WorldState:
                 
                 # 貿易協定
                 if row["trade"].strip().lower() == "true":
-                    active_trades.append(TradeState(country_a=ca, country_b=cb))
+                    tariff_a = float(row.get("tariff_a_to_b", 0.05) or 0.05)
+                    tariff_b = float(row.get("tariff_b_to_a", 0.05) or 0.05)
+                    active_trades.append(TradeState(
+                        country_a=ca, country_b=cb,
+                        tariff_a_to_b=tariff_a, tariff_b_to_a=tariff_b
+                    ))
                 
                 # 経済制裁（方向あり）
                 if row["sanctions_a_to_b"].strip().lower() == "true":

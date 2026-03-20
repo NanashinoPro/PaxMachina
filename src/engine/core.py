@@ -100,13 +100,17 @@ class WorldEngine(
             interest_payment = country.national_debt * DEBT_INTEREST_RATE
             
             # 予算が利払いを下回る場合はデフォルト（未払い分は借金に上乗せ）
-            if tax_revenue >= interest_payment:
-                country.government_budget = tax_revenue - interest_payment
+            total_revenue = tax_revenue + country.tariff_revenue  # 税収 + 関税収入
+            if total_revenue >= interest_payment:
+                country.government_budget = total_revenue - interest_payment
             else:
                 country.government_budget = 0.0
-                default_amount = interest_payment - tax_revenue
+                default_amount = interest_payment - total_revenue
                 country.national_debt += default_amount  # 払えなかった利息が元本組み込み（複利）
                 self.sys_logs_this_turn.append(f"[{country_name} デフォルト] 利払い不能。未払利息 {default_amount:.1f} を債務に追加。")
+            
+            if country.tariff_revenue > 0:
+                self.sys_logs_this_turn.append(f"[{country_name} 関税収入] {country.tariff_revenue:.1f} を歳入に計上 (税収:{tax_revenue:.1f} + 関税:{country.tariff_revenue:.1f} = {total_revenue:.1f})")
             
             # 属国化のデバフ（自然減衰）と外交オーバーライド
             if country.suzerain and country.suzerain not in self.state.countries:

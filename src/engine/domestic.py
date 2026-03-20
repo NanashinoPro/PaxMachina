@@ -62,6 +62,30 @@ class DomesticMixin:
             self.sys_logs_this_turn.append(f"[{country.name} 減税] 税率 {old_tax_rate:.1%}→{new_tax_rate:.1%} (支持率ボーナス: +{bonus:.1f}%)")
         # ------------------------------------------------
 
+        # --- 関税率の更新（財務大臣の決定を反映） ---
+        target_tariffs = getattr(action.domestic_policy, 'target_tariff_rates', {})
+        if target_tariffs:
+            for trade in self.state.active_trades:
+                if trade.country_a == country_name:
+                    target_country = trade.country_b
+                    if target_country in target_tariffs:
+                        new_tariff = max(0.0, target_tariffs[target_country])
+                        # 1ターンあたりの関税率変動を±5%に制限
+                        old_tariff = trade.tariff_a_to_b
+                        clamped_tariff = max(old_tariff - 0.05, min(old_tariff + 0.05, new_tariff))
+                        trade.tariff_a_to_b = clamped_tariff
+                        if abs(clamped_tariff - old_tariff) > 0.001:
+                            self.sys_logs_this_turn.append(f"[{country_name} 関税変更] 対{target_country}: {old_tariff:.1%}→{clamped_tariff:.1%}")
+                elif trade.country_b == country_name:
+                    target_country = trade.country_a
+                    if target_country in target_tariffs:
+                        new_tariff = max(0.0, target_tariffs[target_country])
+                        old_tariff = trade.tariff_b_to_a
+                        clamped_tariff = max(old_tariff - 0.05, min(old_tariff + 0.05, new_tariff))
+                        trade.tariff_b_to_a = clamped_tariff
+                        if abs(clamped_tariff - old_tariff) > 0.001:
+                            self.sys_logs_this_turn.append(f"[{country_name} 関税変更] 対{target_country}: {old_tariff:.1%}→{clamped_tariff:.1%}")
+
         # --- 政策実行力の算出 ---
         # [学術的根拠] 民主主義国家では低支持率時に議会の攻防が激化し政策実現が困難になる。
         # 専制主義では強権的執行が可能ことから下限を保障（最低ε=0.5）。

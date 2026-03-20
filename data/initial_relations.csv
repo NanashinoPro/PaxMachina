@@ -1,4 +1,4 @@
-country_a,country_b,relation_type,trade,sanctions_a_to_b,sanctions_b_to_a,war_aggressor
-アメリカ,中国,neutral,true,false,false,
-アメリカ,日本,alliance,True,false,false,
-中国,日本,neutral,True,false,false,
+country_a,country_b,relation_type,trade,sanctions_a_to_b,sanctions_b_to_a,war_aggressor,tariff_a_to_b,tariff_b_to_a
+アメリカ,中国,neutral,true,false,false,,0.20,0.075
+アメリカ,日本,alliance,True,false,false,,0.015,0.039
+中国,日本,neutral,True,false,false,,0.075,0.039

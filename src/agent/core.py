@@ -17,6 +17,7 @@ from logger import SimulationLogger
 from agent.prompts.foreign import build_foreign_minister_prompt
 from agent.prompts.defense import build_defense_minister_prompt
 from agent.prompts.economic import build_economic_minister_prompt
+from agent.prompts.finance import build_finance_minister_prompt
 from agent.prompts.president import build_president_prompt
 
 from agent.modules.media import GeminiSentimentAnalyzer
@@ -25,7 +26,7 @@ from agent.modules import summit, media, intelligence
 load_dotenv()
 
 class AgentSystem:
-    """Gemini APIを使用して各国家の意思決定を行うAIエージェントシステム（外務・防衛・経済の大臣と大統領の4エージェント制）"""
+    """Gemini APIを使用して各国家の意思決定を行うAIエージェントシステム（外務・防衛・経済・財務の大臣と大統領の5エージェント制）"""
     
     def __init__(self, logger: SimulationLogger = None, model_name: str = "gemini-2.5-pro", db_manager=None): 
         self.logger = logger
@@ -182,16 +183,18 @@ class AgentSystem:
     def _decide_country_action(self, country_name: str, country_state: CountryState, world_state: WorldState, past_news: List[str] = None) -> AgentAction:
         """閣僚エージェントと大統領エージェントを用いた2段階の意思決定を行う"""
         
-        # フェーズ1: 3大臣によるプロポーザルの逐次生成（メモリ使用量削減のため並列実行を廃止）
+        # フェーズ1: 4大臣によるプロポーザルの逐次生成（メモリ使用量削減のため並列実行を廃止）
         foreign_prompt = build_foreign_minister_prompt(country_name, country_state, world_state, past_news)
         defense_prompt = build_defense_minister_prompt(country_name, country_state, world_state, past_news)
         economic_prompt = build_economic_minister_prompt(country_name, country_state, world_state, past_news)
+        finance_prompt = build_finance_minister_prompt(country_name, country_state, world_state, past_news)
 
         proposals = {}
         minister_tasks = [
             ("外務大臣", foreign_prompt, "actions_foreign", "foreign"),
             ("防衛大臣", defense_prompt, "actions_defense", "defense"),
             ("経済内務大臣", economic_prompt, "actions_economic", "economic"),
+            ("財務大臣", finance_prompt, "actions_finance", "finance"),
         ]
         for role_name, prompt, category, key in minister_tasks:
             try:
@@ -210,6 +213,7 @@ class AgentSystem:
             foreign_proposal=proposals.get('foreign', '{}'),
             defense_proposal=proposals.get('defense', '{}'),
             economic_proposal=proposals.get('economic', '{}'),
+            finance_proposal=proposals.get('finance', '{}'),
             past_news=past_news
         )
 

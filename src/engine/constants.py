@@ -28,8 +28,13 @@ DEBT_INTEREST_RATE = 0.01            # 国家債務の利払い金利（2%）
 MACRO_TAX_RATE = 0.30 # (旧定数。今後各国の可変 tax_rate で上書き)
 DEMOCRACY_BASE_SAVING_RATE = 0.25
 AUTHORITARIAN_BASE_SAVING_RATE = 0.30
-TRADE_GRAVITY_FRICTION_ALLIANCE = 1.0
-TRADE_GRAVITY_FRICTION_NEUTRAL = 2.0
+
+# 拡張重力モデル定数（Anderson & van Wincoop 2003）
+GRAVITY_TARIFF_ELASTICITY = 4.0           # 関税弾力性θ（Simonovska & Waugh 2011）
+GRAVITY_ALLIANCE_DISTANCE_FACTOR = 0.5    # 同盟時の実効距離係数（距離を半分にする）
+GRAVITY_SANCTION_DISTANCE_FACTOR = 10.0   # 制裁時の実効距離係数（距離を10倍にする）
+GRAVITY_NORMALIZATION_DISTANCE = 10000.0  # 正規化用基準距離（km）
+DEFAULT_TARIFF_RATE = 0.05                # デフォルト関税率（5%、貿易協定なしの場合）
 
 # 戦争モデルの定数
 DEFENDER_ADVANTAGE_MULTIPLIER = 1.2

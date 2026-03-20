@@ -1,100 +1,120 @@
 import math
-from models import GovernmentType, RelationType
+from models import RelationType
 
 from .constants import (
-    AUTHORITARIAN_BASE_SAVING_RATE, DEMOCRACY_BASE_SAVING_RATE,
-    GOVERNMENT_CROWD_IN_MULTIPLIER, TRADE_GRAVITY_FRICTION_ALLIANCE, TRADE_GRAVITY_FRICTION_NEUTRAL
+    GRAVITY_TARIFF_ELASTICITY, GRAVITY_ALLIANCE_DISTANCE_FACTOR,
+    GRAVITY_SANCTION_DISTANCE_FACTOR, GRAVITY_NORMALIZATION_DISTANCE,
+    DEFAULT_TARIFF_RATE
 )
+
+
+def _haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """2点間のHaversine距離（km）を算出"""
+    R = 6371.0  # 地球の半径 (km)
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
 
 class EconomyMixin:
     def _process_trade_and_sanctions(self):
         # 期限切れ提案のクリア（1ターンのみ有効）
         self.state.pending_summits = [s for s in self.state.pending_summits if s not in self.summits_to_run_this_turn]
         
-        # 同盟提案の期限切れクリア（同ターン内で双方合意が成立しなかった提案を除去）
-        # ※同ターン内で双方がpropose_allianceした場合は _process_diplomacy_and_espionage 内で既に処理済み
-        # 残った提案は次ターンまで保持し、次ターンの _process_diplomacy_and_espionage で再度チェックされる
-        # 2ターン以上放置された提案はここでクリアする（pending_alliances は翌ターンの処理前にリセット）
-        
-        # 当期のNXをリセット
+        # 当期のNXと関税収入をリセット
         for c_name, country in self.state.countries.items():
             country.last_turn_nx = 0.0
+            country.tariff_revenue = 0.0
 
-        # Trade (IS Balance / Trade Deficit Model)
-        # まず全国家のISバランス(貯蓄・投資バランス)を算出
-        macro_balances = {}
-        
-        for c_name, country in self.state.countries.items():
-            dom = self.turn_domestic_factors.get(c_name, {})
-            inv_welfare = dom.get("inv_wel", 0.0)
-            inv_economy = dom.get("inv_econ", 0.0)
-            # engine.py内での統一を図るため、ここでは新モデルに合わせて再度S, I, G, Tを推定
-            
-            # 1. 貯蓄率 (S) ※_process_domestic と同一の式を使用（ARCHITECTURE.md §2.2 準拠）
-            base_s_rate = AUTHORITARIAN_BASE_SAVING_RATE if country.government_type == GovernmentType.AUTHORITARIAN else DEMOCRACY_BASE_SAVING_RATE
-            s_rate = max(0.15, base_s_rate - (inv_welfare * 0.15))
-            
-            # 簡略化のため、ISバランスの評価式に用いる名目上の算出
-            # (S - I) + (T - G) = NX
-            T = country.economy * country.tax_rate
-            # G は前ターンの投資合計割合を予算に掛けたものと推定する
-            G = country.government_budget * dom.get("total_inv", 1.0)
-            
-            C = (country.economy - T) * (1.0 - s_rate)
-            S_private = max(0.0, (country.economy - T) - C) # 民間貯蓄
-            
-            # I は民間貯蓄の85% + インフラ投資により誘発されると仮定
-            I = max(0.0, S_private * 0.85 + (G * inv_economy * GOVERNMENT_CROWD_IN_MULTIPLIER))
-            
-            # IS方程式に基づく経常収支(NX)理論値
-            nx_theoretical = (S_private - I) + (T - G)
-            macro_balances[c_name] = nx_theoretical
+        # 距離キャッシュの構築（起動時に1回のみ計算）
+        if not hasattr(self, '_distance_cache'):
+            self._distance_cache = {}
+            country_names = list(self.state.countries.keys())
+            for i, name_a in enumerate(country_names):
+                ca = self.state.countries[name_a]
+                for j, name_b in enumerate(country_names):
+                    if i >= j:
+                        continue
+                    cb = self.state.countries[name_b]
+                    dist = _haversine_distance(ca.capital_lat, ca.capital_lon, cb.capital_lat, cb.capital_lon)
+                    # 座標が未設定(0,0)の場合はデフォルト距離を使用
+                    if dist < 100:
+                        dist = GRAVITY_NORMALIZATION_DISTANCE
+                    self._distance_cache[(name_a, name_b)] = dist
+                    self._distance_cache[(name_b, name_a)] = dist
+            # 距離ログ
+            for (na, nb), d in self._distance_cache.items():
+                if na < nb:  # 重複を避ける
+                    self.sys_logs_this_turn.append(f"[Trade Distance] {na} ↔ {nb}: {d:.0f} km")
 
+        # === 拡張重力モデルによる貿易 (Anderson & van Wincoop 2003) ===
         for trade in self.state.active_trades:
             if trade.country_a not in self.state.countries or trade.country_b not in self.state.countries:
                 continue
             ca = self.state.countries[trade.country_a]
             cb = self.state.countries[trade.country_b]
             rel = self._get_relation(trade.country_a, trade.country_b)
-            friction = TRADE_GRAVITY_FRICTION_ALLIANCE if rel == RelationType.ALLIANCE else TRADE_GRAVITY_FRICTION_NEUTRAL
             
-            # 重力モデルに基づくベース取引量: 経済規模の平方根に比例、摩擦に反比例
-            base_volume = math.sqrt(ca.economy * cb.economy) / friction
+            # 実効距離の算出
+            raw_dist = self._distance_cache.get((trade.country_a, trade.country_b), GRAVITY_NORMALIZATION_DISTANCE)
+            normalized_dist = raw_dist / GRAVITY_NORMALIZATION_DISTANCE  # 10000km基準で正規化
             
-            # 制裁によるGravity Modelハイブリッド介入
+            # 関係性による距離調整
+            if rel == RelationType.ALLIANCE:
+                effective_dist = normalized_dist * GRAVITY_ALLIANCE_DISTANCE_FACTOR
+            else:
+                effective_dist = normalized_dist
+            
+            # 制裁存在チェック
             sanctions_exist = any(s for s in self.state.active_sanctions if 
                                  (s.imposer == trade.country_a and s.target == trade.country_b) or
                                  (s.imposer == trade.country_b and s.target == trade.country_a))
             if sanctions_exist:
-                base_volume *= 0.05 # 制裁中は貿易額が95%減少
+                effective_dist *= GRAVITY_SANCTION_DISTANCE_FACTOR
             
-            nx_a = macro_balances[trade.country_a]
-            nx_b = macro_balances[trade.country_b]
+            # ゼロ距離防止
+            effective_dist = max(0.01, effective_dist)
             
-            # 【SNA基準への改修】絶対額の差分ではなく、GDPに対する収支比率の差分を用いる（スケール・バイアスの解消）
-            nx_ratio_a = nx_a / max(1.0, ca.economy)
-            nx_ratio_b = nx_b / max(1.0, cb.economy)
-            diff_ratio = nx_ratio_a - nx_ratio_b
+            # 関税率の取得
+            tariff_a_to_b = trade.tariff_a_to_b  # 国Aが国Bからの輸入に課す関税
+            tariff_b_to_a = trade.tariff_b_to_a  # 国Bが国Aからの輸入に課す関税
             
-            # 【学術的適正化】係数を15.0から0.5へ大幅に下方修正。
-            # 貯蓄・投資バランスの差が二国間不均衡に与える影響度（弾力性）を現実的な範囲に収める。
-            raw_transfer = diff_ratio * base_volume * 0.5
+            # 拡張重力モデル: V_ij = √(GDP_i × GDP_j) / (dist^1 × (1+tariff)^θ)
+            # V_ab: AからBへの輸出（Bが輸入するのでBの関税が適用）
+            tariff_factor_b_imports = (1.0 + tariff_b_to_a) ** GRAVITY_TARIFF_ELASTICITY
+            v_a_to_b = math.sqrt(ca.economy * cb.economy) / (effective_dist * tariff_factor_b_imports)
             
-            # 物理的限界のガードレール: 赤字転移額は二国間の貿易総量(base_volume)を超えない
-            transfer_capped_by_volume = max(-base_volume, min(base_volume, raw_transfer))
+            # V_ba: BからAへの輸出（Aが輸入するのでAの関税が適用）
+            tariff_factor_a_imports = (1.0 + tariff_a_to_b) ** GRAVITY_TARIFF_ELASTICITY
+            v_b_to_a = math.sqrt(ca.economy * cb.economy) / (effective_dist * tariff_factor_a_imports)
             
-            # マクロ経済的ガードレール (サドン・ストップ防止): 1ターンの流出は相手国/自国のGDPの3%を上限とする
-            # (IMF等の5%ルールに基づき、四半期ベースで3%＝年率約12%を「歴史的最大級のショック」として設定)
+            # 関税収入の計算
+            tariff_rev_a = v_b_to_a * tariff_a_to_b  # 国Aの関税収入（Bからの輸入に課税）
+            tariff_rev_b = v_a_to_b * tariff_b_to_a  # 国Bの関税収入（Aからの輸入に課税）
+            ca.tariff_revenue += tariff_rev_a
+            cb.tariff_revenue += tariff_rev_b
+            
+            # NXの計算: 輸出 - 輸入
+            ca_nx = v_a_to_b - v_b_to_a  # Aの純輸出
+            cb_nx = v_b_to_a - v_a_to_b  # Bの純輸出（= -ca_nx）
+            
+            # マクロ経済的ガードレール (サドン・ストップ防止): 1ターンの流出はGDPの3%上限
             limit_a = ca.economy * 0.03
             limit_b = cb.economy * 0.03
-            deficit_transfer = max(-limit_a, min(limit_b, transfer_capped_by_volume))
+            if ca_nx < -limit_a:
+                ca_nx = -limit_a
+                cb_nx = limit_a
+            elif cb_nx < -limit_b:
+                cb_nx = -limit_b
+                ca_nx = limit_b
             
-            mutual_bonus = base_volume * 0.005 # 貿易による共通の経済効率化ボーナス
-            
-            # 【SNA基準への改修】GDP(economy)からの直接減算を廃止。
-            # 純輸出(NX)を記録し、赤字分は国家債務に追加
-            ca_nx = mutual_bonus + deficit_transfer
-            cb_nx = mutual_bonus - deficit_transfer
+            # 貿易による共通の経済効率化ボーナス
+            total_volume = v_a_to_b + v_b_to_a
+            mutual_bonus = total_volume * 0.0025
+            ca_nx += mutual_bonus
+            cb_nx += mutual_bonus
             
             ca.last_turn_nx += ca_nx
             cb.last_turn_nx += cb_nx
@@ -108,12 +128,10 @@ class EconomyMixin:
             # 支持率の基礎ボーナス（貿易による相互利益）
             ca_support = 0.5
             cb_support = 0.5
-            if deficit_transfer > 0:
-                # Bが赤字（安い輸入品の恩恵）
+            if ca_nx < 0:
+                ca_support = 1.0  # 赤字国は安い輸入品の恩恵
+            if cb_nx < 0:
                 cb_support = 1.0
-            else:
-                # Aが赤字
-                ca_support = 1.0
                 
             if trade.country_a in self.turn_domestic_factors:
                 self.turn_domestic_factors[trade.country_a]["trade_support_bonus"] += ca_support
@@ -121,10 +139,12 @@ class EconomyMixin:
                 self.turn_domestic_factors[trade.country_b]["trade_support_bonus"] += cb_support
                 
             self.sys_logs_this_turn.append(
-                f"[Trade IS Balance] {trade.country_a} vs {trade.country_b} | "
-                f"Volume:{base_volume:.1f}, NX_Ratio Diff(A-B):{diff_ratio:+.2%} -> "
-                f"{trade.country_a} ({ca_nx:+.1f} GDP_NX, Debt {ca.national_debt:.1f}, {ca_support:+.1f}% Support), "
-                f"{trade.country_b} ({cb_nx:+.1f} GDP_NX, Debt {cb.national_debt:.1f}, {cb_support:+.1f}% Support)"
+                f"[Trade Gravity] {trade.country_a} vs {trade.country_b} | "
+                f"Dist:{raw_dist:.0f}km(eff:{effective_dist:.2f}), "
+                f"Tariff A→B:{tariff_a_to_b:.1%} B→A:{tariff_b_to_a:.1%} | "
+                f"V(A→B):{v_a_to_b:.1f} V(B→A):{v_b_to_a:.1f} | "
+                f"{trade.country_a} NX:{ca_nx:+.1f} TariffRev:{tariff_rev_a:.1f}, "
+                f"{trade.country_b} NX:{cb_nx:+.1f} TariffRev:{tariff_rev_b:.1f}"
             )
             
         # 各国の総貿易収支(NX)による支持率ペナルティ評価

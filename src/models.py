@@ -38,6 +38,11 @@ class CountryState(BaseModel):
     initial_population: float = Field(..., description="初期の総人口（各種規格化やリセット用）")
     working_age_ratio: float = Field(0.60, description="生産年齢人口比率（労働力計算用。初期値60%）")
     
+    # 地理・貿易パラメータ
+    capital_lat: float = Field(0.0, description="首都の緯度")
+    capital_lon: float = Field(0.0, description="首都の経度")
+    tariff_revenue: float = Field(0.0, description="前ターンの関税収入")
+    
     
     # 内政情報
     turns_until_election: Optional[int] = Field(None, description="【民主主義のみ】次回の選挙までのターン数")
@@ -70,6 +75,7 @@ class DomesticAction(BaseModel):
     invest_welfare: float = Field(..., description="治安・福祉維持（支持率維持）への投資割合（0.0-1.0）")
     invest_intelligence: float = Field(0.0, description="諜報・技術開発への投資割合（0.0-1.0。諜報レベルを蓄積し、諜報活動の成功率を向上させる）")
     invest_education_science: float = Field(0.0, description="教育・科学技術への投資割合（0.0-1.0）。人的資本を蓄積し、長期的な経済成長バフを生み出す")
+    target_tariff_rates: Dict[str, float] = Field(default_factory=dict, description="各国に対する目標関税率。キーは国名、値は関税率（0.0〜、上限なし）。財務大臣が決定。")
     reason: str = Field(..., max_length=50, description="この内政決定の簡潔な理由（30文字以内厳守）")
 
 class DiplomaticAction(BaseModel):
@@ -130,6 +136,8 @@ class TradeState(BaseModel):
     """貿易協定を結んでいるペア"""
     country_a: str
     country_b: str
+    tariff_a_to_b: float = Field(0.05, description="国Aが国Bからの輸入品に課す関税率")
+    tariff_b_to_a: float = Field(0.05, description="国Bが国Aからの輸入品に課す関税率")
 
 class SanctionState(BaseModel):
     """経済制裁状態"""

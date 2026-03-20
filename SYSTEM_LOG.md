@@ -1,5 +1,33 @@
 # System Log
 
+## 2026-03-20 21:00:00 - 関税付き拡張重力モデルの導入と財務大臣エージェントの追加
+- **修正内容**: ISバランスベースの貿易モデルを完全に廃止し、Anderson & van Wincoop (2003)に基づく関税付き拡張重力モデルに全面移行。新たに財務大臣エージェントを追加し、税率と関税率の動的決定を可能にした。SNS発信責務を大統領に移管。
+- **学術的根拠**:
+    - Anderson & van Wincoop (2003), *"Gravity with Gravitas"*, American Economic Review: 重力モデルの理論的基礎
+    - Simonovska & Waugh (2011): 関税弾力性θ=4.0の推定値
+    - WTO Applied Tariff Database (2024): 各国間の二国間関税率
+- **実装詳細**:
+    - `data/initial_stats.csv`: 首都座標列（`capital_lat`, `capital_lon`）を追加（東京、ワシントンDC、北京）
+    - `data/initial_relations.csv`: 二国間関税率列（`tariff_a_to_b`, `tariff_b_to_a`）を追加（米中20%/7.5%、米日1.5%/3.9%、中日7.5%/3.9%）
+    - `src/models.py`: `CountryState`（capital_lat/lon, tariff_revenue）、`TradeState`（tariff_a_to_b/b_to_a）、`DomesticAction`（target_tariff_rates）にフィールド追加
+    - `src/engine/constants.py`: `GRAVITY_TARIFF_ELASTICITY=4.0`, `GRAVITY_ALLIANCE_DISTANCE_FACTOR=0.5`, `GRAVITY_SANCTION_DISTANCE_FACTOR=10.0`, `GRAVITY_NORMALIZATION_DISTANCE=10000.0`, `DEFAULT_TARIFF_RATE=0.05`を新規追加。旧定数`TRADE_GRAVITY_FRICTION_*`を廃止
+    - `src/engine/economy.py`: Haversine距離計算、距離キャッシュ、関税弾力性を含む拡張重力モデル、関税収入計算を全面実装。ISバランスロジックを完全削除
+    - `src/engine/domestic.py`: 関税率更新処理を追加（±5%/ターン制限付き）
+    - `src/engine/core.py`: 予算計算に関税収入（`tariff_revenue`）を加算。`total_revenue = tax_revenue + tariff_revenue`
+    - `src/main.py`: CSV読み込みに首都座標と二国間関税率を追加
+    - `src/agent/prompts/finance.py` **[新規]**: 財務大臣プロンプト（税率と関税率の決定、ラッファー曲線の注意喚起を含む）
+    - `src/agent/prompts/economic.py`: tax_rateとsns_postsの決定責務を削除（財務大臣と大統領に移管）
+    - `src/agent/prompts/president.py`: 財務大臣プロポーザル統合、target_tariff_ratesフィールド追加、SNS発信移管
+    - `src/agent/prompts/__init__.py`: 財務大臣インポート追加
+    - `src/agent/core.py`: minister_tasksに財務大臣を追加（4大臣+大統領の5エージェント制）
+- **ドキュメント更新**: `ARCHITECTURE.md` §2.4を拡張重力モデル+関税+財務大臣エージェントの内容に全面改修
+
+> **【AIからの報告】**
+> ボス、貿易モデルを根本から作り直しました。
+> ISバランスモデルを廃止し、首都間距離（Haversine式）と関税弾力性（θ=4.0）を含む拡張重力モデルに全面移行しました。
+> 財務大臣エージェントを新設し、税率と各国への関税率を毎ターン動的に決定する仕組みを導入しています。
+> SNSの発信は大統領に一元化しました。
+
 ## 2026-03-20 16:35:00 - 分裂後GDP急落問題の修正（経済安定化モデルの導入）
 - **修正内容**: 国家分裂後にGDPが毎ターン-15%～-19%で急落し続ける「縮小スパイラル」を解消するため、3つの学術的根拠に基づく経済安定化メカニズムを実装。
 - **学術的根拠**:
