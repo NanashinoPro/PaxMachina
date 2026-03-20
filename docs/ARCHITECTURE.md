@@ -217,9 +217,10 @@ $$ Personnel = \frac{Military}{1人当たりGDP \times 3.4} $$
 首都間の距離（Haversine式で算出）と関税率に基づいて二国間の貿易フローを決定する。
 
 **国iから国jへの貿易フロー $V_{ij}$:**
-$$ V_{ij} = \frac{\sqrt{GDP_i \times GDP_j}}{Dist_{ij}^{eff} \times (1 + Tariff_{ij})^{\theta}} $$
+$$ V_{ij} = S \times \frac{\sqrt{GDP_i \times GDP_j}}{Dist_{ij}^{eff} \times (1 + Tariff_{ij})^{\theta}} $$
 
-- $Dist_{ij}^{eff}$: 実効距離 = `Haversine距離(km) / 10000` × 関係係数
+- $S = 50.0$: 貿易量スケール係数 (`GRAVITY_TRADE_SCALE`, 現実の貿易/GDP比≈3-5%に合わせて逆算)
+- $Dist_{ij}^{eff}$: 実効距離（生km単位）× 関係係数
   - 同盟: ×0.5 (`GRAVITY_ALLIANCE_DISTANCE_FACTOR`)
   - 中立: ×1.0
   - 制裁中: ×10.0 (`GRAVITY_SANCTION_DISTANCE_FACTOR`)

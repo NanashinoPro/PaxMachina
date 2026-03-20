@@ -33,7 +33,7 @@ AUTHORITARIAN_BASE_SAVING_RATE = 0.30
 GRAVITY_TARIFF_ELASTICITY = 4.0           # 関税弾力性θ（Simonovska & Waugh 2011）
 GRAVITY_ALLIANCE_DISTANCE_FACTOR = 0.5    # 同盟時の実効距離係数（距離を半分にする）
 GRAVITY_SANCTION_DISTANCE_FACTOR = 10.0   # 制裁時の実効距離係数（距離を10倍にする）
-GRAVITY_NORMALIZATION_DISTANCE = 10000.0  # 正規化用基準距離（km）
+GRAVITY_TRADE_SCALE = 50.0                # 貿易量スケール係数（現実の貿易/GDP比≈3-5%に合わせて逆算）
 DEFAULT_TARIFF_RATE = 0.05                # デフォルト関税率（5%、貿易協定なしの場合）
 
 # 戦争モデルの定数

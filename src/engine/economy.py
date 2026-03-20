@@ -3,7 +3,7 @@ from models import RelationType
 
 from .constants import (
     GRAVITY_TARIFF_ELASTICITY, GRAVITY_ALLIANCE_DISTANCE_FACTOR,
-    GRAVITY_SANCTION_DISTANCE_FACTOR, GRAVITY_NORMALIZATION_DISTANCE,
+    GRAVITY_SANCTION_DISTANCE_FACTOR, GRAVITY_TRADE_SCALE,
     DEFAULT_TARIFF_RATE
 )
 
@@ -41,7 +41,7 @@ class EconomyMixin:
                     dist = _haversine_distance(ca.capital_lat, ca.capital_lon, cb.capital_lat, cb.capital_lon)
                     # 座標が未設定(0,0)の場合はデフォルト距離を使用
                     if dist < 100:
-                        dist = GRAVITY_NORMALIZATION_DISTANCE
+                        dist = 10000.0  # デフォルト10000km
                     self._distance_cache[(name_a, name_b)] = dist
                     self._distance_cache[(name_b, name_a)] = dist
             # 距離ログ
@@ -58,14 +58,13 @@ class EconomyMixin:
             rel = self._get_relation(trade.country_a, trade.country_b)
             
             # 実効距離の算出
-            raw_dist = self._distance_cache.get((trade.country_a, trade.country_b), GRAVITY_NORMALIZATION_DISTANCE)
-            normalized_dist = raw_dist / GRAVITY_NORMALIZATION_DISTANCE  # 10000km基準で正規化
+            raw_dist = self._distance_cache.get((trade.country_a, trade.country_b), 10000.0)
             
-            # 関係性による距離調整
+            # 関係性による実効距離調整（生km単位）
             if rel == RelationType.ALLIANCE:
-                effective_dist = normalized_dist * GRAVITY_ALLIANCE_DISTANCE_FACTOR
+                effective_dist = raw_dist * GRAVITY_ALLIANCE_DISTANCE_FACTOR
             else:
-                effective_dist = normalized_dist
+                effective_dist = raw_dist
             
             # 制裁存在チェック
             sanctions_exist = any(s for s in self.state.active_sanctions if 
@@ -81,14 +80,15 @@ class EconomyMixin:
             tariff_a_to_b = trade.tariff_a_to_b  # 国Aが国Bからの輸入に課す関税
             tariff_b_to_a = trade.tariff_b_to_a  # 国Bが国Aからの輸入に課す関税
             
-            # 拡張重力モデル: V_ij = √(GDP_i × GDP_j) / (dist^1 × (1+tariff)^θ)
+            # 拡張重力モデル: V_ij = SCALE × √(GDP_i × GDP_j) / (dist_km × (1+tariff)^θ)
             # V_ab: AからBへの輸出（Bが輸入するのでBの関税が適用）
+            gdp_geometric = math.sqrt(ca.economy * cb.economy)
             tariff_factor_b_imports = (1.0 + tariff_b_to_a) ** GRAVITY_TARIFF_ELASTICITY
-            v_a_to_b = math.sqrt(ca.economy * cb.economy) / (effective_dist * tariff_factor_b_imports)
+            v_a_to_b = GRAVITY_TRADE_SCALE * gdp_geometric / (effective_dist * tariff_factor_b_imports)
             
             # V_ba: BからAへの輸出（Aが輸入するのでAの関税が適用）
             tariff_factor_a_imports = (1.0 + tariff_a_to_b) ** GRAVITY_TARIFF_ELASTICITY
-            v_b_to_a = math.sqrt(ca.economy * cb.economy) / (effective_dist * tariff_factor_a_imports)
+            v_b_to_a = GRAVITY_TRADE_SCALE * gdp_geometric / (effective_dist * tariff_factor_a_imports)
             
             # 関税収入の計算
             tariff_rev_a = v_b_to_a * tariff_a_to_b  # 国Aの関税収入（Bからの輸入に課税）
