@@ -1,8 +1,29 @@
 from typing import List
 from models import WorldState, CountryState
 
+
+def _filter_news_for_country(news_list: List[str], country_name: str, all_country_names: List[str]) -> List[str]:
+    """自国に関連するニュース + グローバルニュース（どの国名も含まないもの）のみ抽出する。
+    
+    自国が直接関与しない他国間のニュース（例：A国→B国の外交メッセージ）を除外し、
+    プロンプトサイズを削減することで、LLMのDB検索ツール利用を促進する。
+    """
+    filtered = []
+    for news in news_list:
+        # 自国名が含まれている → 関連ニュース（自国が送受信側、または言及対象）
+        if country_name in news:
+            filtered.append(news)
+        # どの国名も含まない → グローバルニュース（全員に配信）
+        elif not any(name in news for name in all_country_names):
+            filtered.append(news)
+    return filtered
+
+
 def build_common_context(country_name: str, country_state: CountryState, world_state: WorldState, past_news: List[str] = None, role_name: str = "最高指導者（首脳）") -> str:
     """すべてのエージェント（大統領、各大臣）が共有する基本ステータスとニュースコンテキストを構築する"""
+    
+    # 全国名リストを取得（ニュースフィルタリング用）
+    all_country_names = list(world_state.countries.keys())
     
     my_info = (
         f"あなたは「{country_name}」の{role_name}です。\n"
@@ -70,7 +91,8 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
     
     my_info += "---🗄️【国家情報局(RAG) 過去の重要記録アクセス機能】🗄️---\n"
     my_info += "あなたは関数呼び出し(Function Calling)により `search_historical_events(query)` ツールを使用可能です。\n"
-    my_info += "【重要】現在の意思決定において、過去の事件の詳細、他国との過去の密約、特定の技術革新の履歴など、文脈上不足している重要な情報がある場合は、**推論を決定する前に必ずこのツールを呼び出して情報を検索してください。**\n\n"
+    my_info += "【重要】現在の意思決定において、過去の事件の詳細、他国との過去の密約、特定の技術革新の履歴など、文脈上不足している重要な情報がある場合は、**推論を決定する前に必ずこのツールを呼び出して情報を検索してください。**\n"
+    my_info += "※ニュースは自国に関連するもののみ表示されています。他国間の動向を知りたい場合は、必ずこのツールで検索してください。\n\n"
     
     active_trades = world_state.active_trades if hasattr(world_state, 'active_trades') else []
     my_trades = []
@@ -136,7 +158,8 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
         
     news_info = ""
     if past_news:
-        news_info = "---直近1年(4四半期)の世界のニュース---\n"
+        news_info = "---直近1年(4四半期)の自国関連ニュース---\n"
+        news_info += "※自国に直接関連するニュースのみ表示。他国間の動向はsearch_historical_eventsツールで検索可能です。\n"
         for i, turn_news in enumerate(past_news):
             t = world_state.turn - len(past_news) + i
             if t > 0:
@@ -147,14 +170,19 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
                 news_info += "【過去のニュース】\n"
             
             if isinstance(turn_news, (list, tuple)):
-                if not turn_news:
+                # 自国関連ニュースのみにフィルタリング
+                filtered_news = _filter_news_for_country(turn_news, country_name, all_country_names)
+                if not filtered_news:
                     news_info += "特になし\n"
                 else:
-                    news_info += "\n".join(f"- {n}" for n in turn_news) + "\n"
+                    news_info += "\n".join(f"- {n}" for n in filtered_news) + "\n"
             else:
+                # 単一文字列の場合はフィルタ不要（そのまま表示）
                 news_info += f"- {turn_news}\n"
         news_info += "\n"
     elif world_state.news_events:
-        news_info = "---直近のニュース---\n" + "\n".join(f"- {n}" for n in world_state.news_events[-20:]) + "\n\n"
+        # フォールバック: past_newsがない場合もフィルタリングを適用
+        filtered_events = _filter_news_for_country(world_state.news_events[-20:], country_name, all_country_names)
+        news_info = "---直近のニュース---\n" + "\n".join(f"- {n}" for n in filtered_events) + "\n\n"
         
     return my_info + other_info + news_info
