@@ -194,17 +194,20 @@ def main():
                 last_turn_data = json.loads(last_line)
                 world_state = WorldState.model_validate(last_turn_data["world_state"])
             
-        # ファイル名から session_id を抽出 (例: sim_20260301_192846.jsonl)
-        filename = os.path.basename(args.resume)
-        if filename.startswith("sim_") and filename.endswith(".jsonl"):
-            session_id = filename[4:-6]
-        else:
-            session_id = None
-            
-        logger = SimulationLogger(session_id=session_id)
-        logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
         if args.resume_turn is not None:
-            logger.sys_log(f"[Resume] ターン {args.resume_turn} の状態から再開")
+            # resume-turn: 新しいセッションで新しいファイルに保存
+            logger = SimulationLogger()
+            logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
+            logger.sys_log(f"[Resume] ターン {args.resume_turn} の状態から再開 (元ファイル: {args.resume})")
+        else:
+            # 従来の --resume: 同じセッションに追記
+            filename = os.path.basename(args.resume)
+            if filename.startswith("sim_") and filename.endswith(".jsonl"):
+                session_id = filename[4:-6]
+            else:
+                session_id = None
+            logger = SimulationLogger(session_id=session_id)
+            logger.sys_log(f"[Reproducibility] 乱数シード: {current_seed}")
     else:
         # システム初期化
         world_state = initialize_world()
