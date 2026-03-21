@@ -2,7 +2,7 @@ import time
 import json
 import os
 import random
-from models import WorldState, CountryState, GovernmentType, RelationType, TradeState, SanctionState, WarState
+from models import WorldState, CountryState, GovernmentType, RelationType, TradeState, SanctionState, WarState, PendingAidProposal
 from engine import WorldEngine
 from agent import AgentSystem
 from logger import SimulationLogger
@@ -58,6 +58,7 @@ def initialize_world() -> WorldState:
     active_trades = []
     active_wars = []
     active_sanctions = []
+    initial_aid_proposals = []
     relations_csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "initial_relations.csv")
     
     if os.path.exists(relations_csv_path):
@@ -106,8 +107,25 @@ def initialize_world() -> WorldState:
                         defender_commitment_ratio=def_commit,
                         target_occupation_progress=init_progress
                     ))
+                
+                # 初期援助の読み込み（PendingAidProposalとして登録）
+                aid_eco_a = float(row.get("initial_aid_economy_a_to_b", 0.0) or 0.0)
+                aid_mil_a = float(row.get("initial_aid_military_a_to_b", 0.0) or 0.0)
+                aid_eco_b = float(row.get("initial_aid_economy_b_to_a", 0.0) or 0.0)
+                aid_mil_b = float(row.get("initial_aid_military_b_to_a", 0.0) or 0.0)
+                
+                if aid_eco_a > 0 or aid_mil_a > 0:
+                    initial_aid_proposals.append(PendingAidProposal(
+                        donor=ca, target=cb,
+                        amount_economy=aid_eco_a, amount_military=aid_mil_a
+                    ))
+                if aid_eco_b > 0 or aid_mil_b > 0:
+                    initial_aid_proposals.append(PendingAidProposal(
+                        donor=cb, target=ca,
+                        amount_economy=aid_eco_b, amount_military=aid_mil_b
+                    ))
         
-        print(f"📋 initial_relations.csv を読み込みました: 貿易{len(active_trades)}件, 制裁{len(active_sanctions)}件, 戦争{len(active_wars)}件")
+        print(f"📋 initial_relations.csv を読み込みました: 貿易{len(active_trades)}件, 制裁{len(active_sanctions)}件, 戦争{len(active_wars)}件, 初期援助{len(initial_aid_proposals)}件")
     else:
         print("⚠️ initial_relations.csv が見つかりません。全関係をNEUTRALで初期化します。")
 
@@ -119,6 +137,8 @@ def initialize_world() -> WorldState:
         initial_news.append(f"🤝 {trade.country_a}と{trade.country_b}は貿易協定を締結しています。")
     for sanction in active_sanctions:
         initial_news.append(f"⛔ {sanction.imposer}が{sanction.target}に経済制裁を発動中です。")
+    for aid in initial_aid_proposals:
+        initial_news.append(f"💰 {aid.donor}が{aid.target}に対して援助を提供中です（経済{aid.amount_economy:.1f}, 軍事{aid.amount_military:.1f}）。")
 
     world = WorldState(
         turn=1,
@@ -129,7 +149,8 @@ def initialize_world() -> WorldState:
         active_wars=active_wars,
         active_trades=active_trades,
         active_sanctions=active_sanctions,
-        news_events=initial_news
+        news_events=initial_news,
+        pending_aid_proposals=initial_aid_proposals
     )
     return world
 

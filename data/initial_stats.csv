@@ -1,3 +1,4 @@
 name,government_type,ideology,economy,military,intelligence_level,area,approval_rating,turns_until_election,rebellion_risk,press_freedom,human_capital_index,mean_years_schooling,population,capital_lat,capital_lon
 ロシア,authoritarian,,2100.0,400.0,95.0,17098242.0,80.0,,5.0,0.15,3.310,12.4,144.0,55.75,37.62
 ウクライナ,democracy,,210.0,100.0,50.0,603628.0,65.0,4,,0.55,2.800,11.3,38.0,50.45,30.52
+アメリカ,democracy,,28000.0,800.0,120.0,9833520.0,50.0,8,,0.67,3.774,13.7,335.0,38.90,-77.04
