@@ -169,9 +169,9 @@ $$\phi(s) = \begin{cases} 0.134 \times s & (s \le 4) \\ 0.134 \times 4 + 0.101 \
 #### 投資による平均就学年数（MYS）の更新
 [学術的根拠] Jackson et al. (2016, QJE): 教育支出10%増 → 完了就学年数 +0.27~0.43年
 
-$$MYS_t = MYS_{t-1} \times (1 - 0.003) + \ln(1 + \frac{G_{edu}}{Y_{t-1}} \times 10.0) \times 0.04$$
+$$MYS_t = MYS_{t-1} \times (1 - 0.001) + \ln(1 + \frac{G_{edu}}{Y_{t-1}} \times 10.0) \times 0.04$$
 - $G_{edu}$: 政府の教育・科学投資額
-- 0.003: MYSの四半期あたり自然減衰率（年1.2%。退職・知識陳腐化）
+- 0.001: MYSの四半期あたり自然減衰率（年0.4%。退職・知識陳腐化）
 - 0.04: 教育投資のMYS増加効率 (`MYS_GROWTH_RATE`)
 - MYS更新後、$HCI = e^{\phi(MYS)}$ を再計算してモデルに反映
 
