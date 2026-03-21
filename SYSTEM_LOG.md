@@ -1,5 +1,16 @@
 # System Log
 
+## 2026-03-22 08:26:00 - 防衛大臣プロンプトにwar_commitment_ratio（投入比率変更）を追加
+- **修正内容**: 防衛大臣AIが戦時の投入比率(`war_commitment_ratio`)を判断・変更できるようにプロンプトを改修。従来は外務大臣のDiplomaticActionにのみ存在し、防衛大臣は投入比率を変更できなかった。
+- **修正詳細**:
+    - `src/agent/prompts/defense.py`: 「戦時の軍事力投入比率（war_commitment_ratio）の決定ルール」セクションとJSONフィールドを追加。攻撃側/防衛側の推奨投入率を明記。
+    - `src/agent/prompts/president.py`: diplomatic_policiesスキーマに`war_commitment_ratio`フィールドを追加。防衛大臣の提案を交戦相手国のpolicyに反映するよう指示。
+- **処理チェーン**: 防衛大臣(提案) → 大統領(最終決定) → DiplomaticAction.war_commitment_ratio → diplomacy.py(WarState更新)
+
+> **【AIからの報告】**
+> ボス、防衛大臣が投入比率を変更できるようにプロンプトを修正しました。
+> これでAIが戦況に応じて投入率を動的に調整できるようになります。
+
 ## 2026-03-21 23:24:00 - Rally 'round the Flag 効果の実装（防衛側支持率急落問題の修正）
 - **修正内容**: 侵攻を受けている防衛側の支持率が初ターンから急落する問題を修正。Mueller (1970, 1973)の「Rally 'round the flag」効果を実装し、防衛側は戦争初期に支持率がボーナスを得る一方、長期化で戦争疲弊に転じるモデルに変更。
 - **学術的根拠**: Mueller (1970), "Presidential Popularity from Truman to Johnson" — 国際危機時に支持率が一時的に急上昇する現象。ウクライナのゼレンスキー大統領（2022年: 30%→91%）が代表例。

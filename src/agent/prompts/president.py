@@ -68,6 +68,7 @@ def build_president_prompt(country_name: str, country_state: CountryState, world
       "aid_amount_economy": 0.0,
       "aid_amount_military": 0.0,
       "aid_acceptance_ratio": 1.0,
+      "war_commitment_ratio": 0.1から1.0の数値（交戦中の相手国に対してのみ。防衛大臣の提案を参考に設定。変更不要なら省略可）,
       "espionage_gather_intel": bool,
       "espionage_intel_strategy": "手段",
       "reasoning_for_sabotage": "工作の考察",
@@ -79,5 +80,6 @@ def build_president_prompt(country_name: str, country_state: CountryState, world
 }}}}
 ```
 ※ `diplomatic_policies` は相手国の数だけ配列に入れてください。行動がない国は対象外でよいです。防衛大臣の `espionage_targets` の内容もここに統合してください。
+※ 防衛大臣が `war_commitment_ratio` を提案している場合、交戦相手国のdiplomatic_policyにその値を反映してください。
 """
     return common_ctx + instructions
