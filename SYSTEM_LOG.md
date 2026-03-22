@@ -1,5 +1,19 @@
 # System Log
 
+## 2026-03-22 09:12:00 - ダメージモデル修正（投入分限定）と初期援助の即時適用
+- **修正内容**:
+    1. **ダメージモデル修正**: 戦闘ダメージが総軍事力から差し引かれていたバグを修正。`min(damage, committed)` で投入分のみに限定し、後方予備軍は温存される仕組みに変更。
+    2. **初期援助の即時適用**: 初期援助がPendingAidProposal（翌ターン承認制）で1ターン遅延していた問題を修正。Turn 1開始時にtarget国のmilitary/economyに直接加算し、さらに次ターン分もPendingとして登録（AIが継続援助の参考にする）。
+- **修正詳細**:
+    - `src/engine/military.py`: `agg_damage = min(agg_damage_raw, agg_committed)`, `def_damage = min(def_damage_raw, def_committed)` を追加。
+    - `src/main.py`: 初期援助をtarget国のstatsに直接加算するロジックに変更。PendingAidProposalも同時に登録。
+- **テスト結果**: ウクライナ初期値 Mil=100→105（+5軍事援助）, GDP=210→214（+4経済援助）を確認。
+
+> **【AIからの報告】**
+> ボス、2つの修正を実施しました。
+> ① ダメージが全軍から引かれていた問題を修正。投入分のみに限定し、予備軍は温存されます。
+> ② 初期援助がTurn 1で即座に反映されるようになりました。AIもその援助額を見て後続の判断ができます。
+
 ## 2026-03-22 08:26:00 - 防衛大臣プロンプトにwar_commitment_ratio（投入比率変更）を追加
 - **修正内容**: 防衛大臣AIが戦時の投入比率(`war_commitment_ratio`)を判断・変更できるようにプロンプトを改修。従来は外務大臣のDiplomaticActionにのみ存在し、防衛大臣は投入比率を変更できなかった。
 - **修正詳細**:

@@ -59,6 +59,7 @@ def initialize_world() -> WorldState:
     active_wars = []
     active_sanctions = []
     initial_aid_proposals = []
+    initial_aid_entries = []
     relations_csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "initial_relations.csv")
     
     if os.path.exists(relations_csv_path):
@@ -108,26 +109,35 @@ def initialize_world() -> WorldState:
                         target_occupation_progress=init_progress
                     ))
                 
-                # 初期援助の読み込み（PendingAidProposalとして登録）
+                # 初期援助の読み込み（「すでに流れている援助」として即時反映 + 次ターン分もPendingとして登録）
                 aid_eco_a = float(row.get("initial_aid_economy_a_to_b", 0.0) or 0.0)
                 aid_mil_a = float(row.get("initial_aid_military_a_to_b", 0.0) or 0.0)
                 aid_eco_b = float(row.get("initial_aid_economy_b_to_a", 0.0) or 0.0)
                 aid_mil_b = float(row.get("initial_aid_military_b_to_a", 0.0) or 0.0)
                 
                 if aid_eco_a > 0 or aid_mil_a > 0:
-                    initial_aid_proposals.append(PendingAidProposal(
-                        donor=ca, target=cb,
-                        amount_economy=aid_eco_a, amount_military=aid_mil_a
-                    ))
+                    initial_aid_entries.append({"donor": ca, "target": cb, "eco": aid_eco_a, "mil": aid_mil_a})
                 if aid_eco_b > 0 or aid_mil_b > 0:
-                    initial_aid_proposals.append(PendingAidProposal(
-                        donor=cb, target=ca,
-                        amount_economy=aid_eco_b, amount_military=aid_mil_b
-                    ))
+                    initial_aid_entries.append({"donor": cb, "target": ca, "eco": aid_eco_b, "mil": aid_mil_b})
         
-        print(f"📋 initial_relations.csv を読み込みました: 貿易{len(active_trades)}件, 制裁{len(active_sanctions)}件, 戦争{len(active_wars)}件, 初期援助{len(initial_aid_proposals)}件")
+        print(f"📋 initial_relations.csv を読み込みました: 貿易{len(active_trades)}件, 制裁{len(active_sanctions)}件, 戦争{len(active_wars)}件, 初期援助{len(initial_aid_entries)}件")
     else:
         print("⚠️ initial_relations.csv が見つかりません。全関係をNEUTRALで初期化します。")
+
+    # 初期援助の即時適用（Turn 1開始時にすでに援助が流れている状態を再現）
+    for aid in initial_aid_entries:
+        donor_state = countries.get(aid["donor"])
+        target_state = countries.get(aid["target"])
+        if donor_state and target_state:
+            # ① 即時反映: target国のmilitary/economyに直接加算
+            target_state.military += aid["mil"]
+            target_state.economy += aid["eco"]
+            print(f"  💰 初期援助即時反映: {aid['donor']}→{aid['target']} (経済+{aid['eco']:.1f}, 軍事+{aid['mil']:.1f})")
+            # ② 次ターン分: PendingAidProposalとして登録（AIが継続援助の参考にする）
+            initial_aid_proposals.append(PendingAidProposal(
+                donor=aid["donor"], target=aid["target"],
+                amount_economy=aid["eco"], amount_military=aid["mil"]
+            ))
 
     # ニュースイベントの初期化（初期関係に基づく）
     initial_news = ["世界のリーダーたちが行動を開始しています。"]
@@ -137,8 +147,8 @@ def initialize_world() -> WorldState:
         initial_news.append(f"🤝 {trade.country_a}と{trade.country_b}は貿易協定を締結しています。")
     for sanction in active_sanctions:
         initial_news.append(f"⛔ {sanction.imposer}が{sanction.target}に経済制裁を発動中です。")
-    for aid in initial_aid_proposals:
-        initial_news.append(f"💰 {aid.donor}が{aid.target}に対して援助を提供中です（経済{aid.amount_economy:.1f}, 軍事{aid.amount_military:.1f}）。")
+    for aid in initial_aid_entries:
+        initial_news.append(f"💰 {aid['donor']}は{aid['target']}に対して継続的な援助を実施中です（経済{aid['eco']:.1f}B, 軍事{aid['mil']:.1f}B/四半期）。")
 
     world = WorldState(
         turn=1,

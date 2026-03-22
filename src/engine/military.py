@@ -29,16 +29,20 @@ class MilitaryMixin:
             def_power = def_committed * DEFENDER_ADVANTAGE_MULTIPLIER
             agg_power = agg_committed
             
-            agg_damage = def_power * random.uniform(0.05, 0.15)
-            def_damage = agg_power * random.uniform(0.05, 0.15)
+            agg_damage_raw = def_power * random.uniform(0.05, 0.15)
+            def_damage_raw = agg_power * random.uniform(0.05, 0.15)
+            
+            # 損害は投入分のみに適用（後方予備軍は温存）
+            # ダメージが投入戦力を超えた場合、投入分の消滅のみで予備軍には波及しない
+            agg_damage = min(agg_damage_raw, agg_committed)
+            def_damage = min(def_damage_raw, def_committed)
+            
+            aggressor.military = max(0.0, aggressor.military - agg_damage)
+            defender.military = max(0.0, defender.military - def_damage)
             
             # 人口減少計算（軍事ダメージ割合に比例。防衛側は戦場となるため民間人被害が大きい）
             agg_pop_loss = aggressor.population * (agg_damage / max(1.0, agg_committed)) * 0.05
             def_pop_loss = defender.population * (def_damage / max(1.0, def_committed)) * 0.15
-            
-            # 損害は投入分のみに適用（後方軍は温存）
-            aggressor.military = max(0.0, aggressor.military - agg_damage)
-            defender.military = max(0.0, defender.military - def_damage)
             
             aggressor.population = max(0.1, aggressor.population - agg_pop_loss)
             defender.population = max(0.1, defender.population - def_pop_loss)
