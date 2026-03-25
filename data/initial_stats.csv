@@ -1,6 +1,6 @@
 name,government_type,ideology,economy,military,intelligence_level,area,approval_rating,turns_until_election,rebellion_risk,press_freedom,human_capital_index,mean_years_schooling,population,capital_lat,capital_lon
 アメリカ,democracy,,29300.0,850.0,120.0,9833520.0,47.0,16,,0.67,3.774,13.7,335.0,38.90,-77.04
-イスラエル,democracy,,565.0,47.0,110.0,22145.0,40.0,7,,0.38,3.400,13.0,9.9,31.77,35.21
+イスラエル,democracy,,565.0,47.0,110.0,22145.0,40.0,8,,0.38,3.400,13.0,9.9,31.77,35.21
 イラン,authoritarian,,400.0,17.0,60.0,1648195.0,55.0,,10.0,0.02,2.500,10.4,90.0,35.69,51.42
 サウジアラビア,authoritarian,,1110.0,76.0,40.0,2149690.0,87.0,,,0.10,2.700,10.5,35.0,24.71,46.68
 中国,authoritarian,,18800.0,230.0,100.0,9596960.0,85.0,,,0.01,2.600,10.8,1408.0,39.90,116.40
