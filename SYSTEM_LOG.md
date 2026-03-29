@@ -1326,3 +1326,19 @@ Resolved the hyper-exponential growth issue in the simulation engine. The previo
 > 5. 関税率0%は通常非推奨と明記（関税収入ゼロ＋NX最大悪化の二重損失）
 > 6. 貿易赤字（NX<0）が国家債務に自動加算される仕組みを注記
 
+## 2026-03-30 00:30 - メディア記事生成時の型安全性バグ修正 (media.py)
+
+- **バグ内容**: `generate_media_reports()` において、Gemini APIからの応答が想定外の型（`None`、辞書、リスト等）で返された場合、`GeminiSentimentAnalyzer.analyze()` 内の `text[:300]` スライス操作で `TypeError: slice(None, 300, None)` が発生し、当該国のメディア記事生成がスキップされるバグ。
+  - シミュレーション `system_20260329_234018.log` にて、台湾（3回）・アメリカ（2回）・日本（1回）の計6回のメディア記事生成失敗を確認。
+  - これはAPIエラー（レートリミットやネットワーク障害）ではなく、Gemini APIの応答が不正なフォーマット（`article`フィールドが文字列でない値）であった際のバリデーション不足が原因。
+- **修正内容 (`src/agent/modules/media.py`)**:
+  1. `GeminiSentimentAnalyzer.analyze()`: `text` パラメータが文字列でない場合に `str()` で強制変換する型チェックガードを追加。`None` の場合は空文字列にフォールバック。
+  2. `generate_media_reports()`: `data.get("article")` の戻り値が文字列でない場合に `str()` で強制変換する型チェックガードを追加。`None` の場合は `"ニュース報道なし"` にフォールバック。
+- **ドキュメント更新**: `ARCHITECTURE.md` の §2.9 メディア報道フェーズに「型安全性チェック (Type Safety Guard)」のサブセクションを追加。
+- **補足**: 同ログで1回発生した `[API Fallback] サブAPIキーでも失敗` (`RetryError[TypeError]`) は、APIリクエスト構築時の型エラーに起因する別の問題であり、空の提案 `{}` にフォールバックして続行する既存の安全装置が正常に機能した。
+
+> **【AIからの報告】**
+>
+> ボス、メディア記事生成時の `slice(None, 300, None)` エラーの原因を特定し修正しました。
+> これはAPIのレートリミットやネットワーク障害ではなく、Gemini APIからの応答が想定外の型で返ってきた場合の型チェック不足が原因でした。
+> `analyze()` と `generate_media_reports()` の2箇所に防御ロジックを追加し、`ARCHITECTURE.md` にも仕様を反映しています。

@@ -32,6 +32,8 @@ class GeminiSentimentAnalyzer:
         return scores if scores else [0.0]
     
     def analyze(self, text: str) -> list:
+        if not isinstance(text, str):
+            text = str(text) if text is not None else ""
         prompt = (
             "以下のテキストの感情をスコアで評価してください。\n"
             "スコアは -1.0（非常にネガティブ）から +1.0（非常にポジティブ）の範囲で、"
@@ -372,6 +374,8 @@ def generate_media_reports(
             data = json.loads(response)
             
             article = data.get("article", "ニュース報道なし")
+            if not isinstance(article, str):
+                article = str(article) if article is not None else "ニュース報道なし"
             
             scores = sentiment_analyzer.analyze(article)
             avg_score = sum(scores) / len(scores) if scores else 0.0
