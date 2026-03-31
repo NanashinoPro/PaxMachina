@@ -154,6 +154,115 @@ class MilitaryMixin:
             def_power = def_committed * DEFENDER_ADVANTAGE_MULTIPLIER
             agg_power = agg_committed
             
+            # === 配備ベースの戦闘バフ/デバフ ===
+            agg_bonus_log = []
+            def_bonus_log = []
+            
+            # 攻撃側の配備効果
+            for d in aggressor.military_deployment.deployments:
+                if d.target_country != war.defender:
+                    continue
+                d_type = d.type.value if hasattr(d.type, 'value') else str(d.type)
+                
+                if d_type == "army":
+                    posture = d.posture.value if d.posture and hasattr(d.posture, 'value') else 'defensive'
+                    if posture == "offensive":
+                        agg_power *= 1.20  # 攻撃態勢: +20%
+                        def_power *= 0.90  # 守備態勢が攻撃に不利
+                        agg_bonus_log.append(f"陸軍攻撃態勢+20%")
+                    elif posture == "defensive":
+                        agg_power *= 0.80  # 防御態勢: 攻撃-20%
+                        agg_bonus_log.append(f"陸軍防御態勢（攻撃-20%）")
+                    
+                elif d_type == "navy":
+                    mission = d.naval_mission.value if d.naval_mission and hasattr(d.naval_mission, 'value') else 'patrol'
+                    if mission == "amphibious_support":
+                        agg_power *= 1.20  # 上陸支援: +20%
+                        agg_bonus_log.append(f"海軍上陸支援+20%")
+                    elif mission == "shore_bombardment":
+                        def_power *= 0.85  # 艦砲射撃: 防衛側-15%
+                        agg_bonus_log.append(f"艦砲射撃（敵-15%）")
+                    elif mission == "naval_engagement":
+                        agg_bonus_log.append(f"艦隊決戦を実施")
+                    elif mission == "blockade":
+                        agg_bonus_log.append(f"海上封鎖を実施")
+                        
+                elif d_type == "air":
+                    mission = d.air_mission.value if d.air_mission and hasattr(d.air_mission, 'value') else 'air_superiority'
+                    if mission == "ground_support":
+                        agg_power *= 1.15  # 近接航空支援: +15%
+                        agg_bonus_log.append(f"空軍地上支援+15%")
+                    elif mission == "air_superiority":
+                        agg_power *= 1.05  # 制空権: +5%
+                        agg_bonus_log.append(f"制空権確保+5%")
+                    elif mission == "strategic_bombing":
+                        agg_bonus_log.append(f"戦略爆撃を実施")
+            
+            # 防衛側の配備効果
+            for d in defender.military_deployment.deployments:
+                if d.target_country != war.aggressor:
+                    continue
+                d_type = d.type.value if hasattr(d.type, 'value') else str(d.type)
+                
+                if d_type == "army":
+                    posture = d.posture.value if d.posture and hasattr(d.posture, 'value') else 'defensive'
+                    fortify = d.fortify.value if d.fortify and hasattr(d.fortify, 'value') else 'none'
+                    if posture == "defensive":
+                        def_power *= 1.30  # 防御態勢: +30%
+                        def_bonus_log.append(f"陸軍防御態勢+30%")
+                    elif posture == "offensive":
+                        def_power *= 0.90
+                        def_bonus_log.append(f"陸軍攻撃態勢(守備-10%)")
+                    
+                    if fortify == "light":
+                        def_power *= 1.25  # 軽要塞: +25%
+                        def_bonus_log.append(f"軽要塞化+25%")
+                    elif fortify == "heavy":
+                        def_power *= 1.50  # 重要塞: +50%
+                        def_bonus_log.append(f"重要塞化+50%")
+                        
+                elif d_type == "air":
+                    mission = d.air_mission.value if d.air_mission and hasattr(d.air_mission, 'value') else 'air_superiority'
+                    if mission == "ground_support":
+                        def_power *= 1.10
+                        def_bonus_log.append(f"空軍地上支援+10%")
+                    elif mission == "air_superiority":
+                        def_power *= 1.08
+                        def_bonus_log.append(f"制空権確保+8%")
+            
+            if agg_bonus_log or def_bonus_log:
+                self.sys_logs_this_turn.append(
+                    f"[配備ベース戦闘] {war.aggressor} バフ: [{', '.join(agg_bonus_log) if agg_bonus_log else 'なし'}] | "
+                    f"{war.defender} バフ: [{', '.join(def_bonus_log) if def_bonus_log else 'なし'}]"
+                )
+            
+            # 戦略爆撃の経済ダメージ（双方を処理）
+            for attacker, target, atk_name, tgt_name in [
+                (aggressor, defender, war.aggressor, war.defender),
+                (defender, aggressor, war.defender, war.aggressor)
+            ]:
+                for d in attacker.military_deployment.deployments:
+                    if d.target_country != tgt_name:
+                        continue
+                    d_type = d.type.value if hasattr(d.type, 'value') else str(d.type)
+                    if d_type == "air":
+                        mission = d.air_mission.value if d.air_mission and hasattr(d.air_mission, 'value') else ''
+                        if mission == "strategic_bombing":
+                            econ_damage = target.economy * 0.01 * d.squadrons
+                            target.economy = max(1.0, target.economy - econ_damage)
+                            self.sys_logs_this_turn.append(
+                                f"[戦略爆撃] {atk_name} → {tgt_name}: 経済ダメージ {econ_damage:.1f} ({d.squadrons}飛行隊)"
+                            )
+                    elif d_type == "navy":
+                        mission = d.naval_mission.value if d.naval_mission and hasattr(d.naval_mission, 'value') else ''
+                        if mission == "blockade":
+                            blockade_damage = target.economy * 0.005 * d.fleets
+                            target.economy = max(1.0, target.economy - blockade_damage)
+                            self.sys_logs_this_turn.append(
+                                f"[海上封鎖] {atk_name} → {tgt_name}: 貿易遮断ダメージ {blockade_damage:.1f} ({d.fleets}艦隊)"
+                            )
+            
+            # ダメージ計算（配備バフ適用済みのpower値を使用）
             agg_damage_raw = def_power * random.uniform(0.05, 0.15)
             def_damage_raw = agg_power * random.uniform(0.05, 0.15)
             
