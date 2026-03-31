@@ -203,6 +203,10 @@ class AgentAction(BaseModel):
     update_hidden_plans: str = Field("", description="次ターンの自分に引き継ぐべき非公開の計画や長期戦略のメモ（変更がなければ前回のままにするか、空欄にするのではなく記載してください）")
     domestic_policy: DomesticAction = Field(..., description="内政の予算分配")
     diplomatic_policies: List[DiplomaticAction] = Field(..., description="他国に対する個別の外交アクションのリスト")
+    
+    # 軍事配備関連（防衛大臣が決定、大統領が承認）
+    force_allocation: Optional[ForceAllocation] = Field(None, description="陸海空の兵科比率（合計1.0）。省略時は前ターンの設定を維持")
+    deployments: List[MilitaryDeploymentOrder] = Field(default_factory=list, description="各方面への軍事配備命令リスト")
 
 # ---------------------------------------------------------
 # 世界（World）の状態定義

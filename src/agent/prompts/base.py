@@ -215,4 +215,21 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
         filtered_events = _filter_news_for_country(world_state.news_events[-20:], country_name, all_country_names)
         news_info = "---直近のニュース---\n" + "\n".join(f"- {n}" for n in filtered_events) + "\n\n"
         
-    return my_info + other_info + news_info
+    # 緊張度情報の注入
+    tension_info = ""
+    try:
+        from engine.tension import build_tension_info_for_target, build_tension_info_for_threatener
+        
+        # 威嚇される側の情報
+        target_info = build_tension_info_for_target(world_state, country_name)
+        if target_info:
+            tension_info += "\n" + target_info + "\n"
+        
+        # 威嚇する側の情報（オーディエンスコスト警告）
+        threatener_info = build_tension_info_for_threatener(world_state, country_name)
+        if threatener_info:
+            tension_info += "\n" + threatener_info + "\n"
+    except Exception:
+        pass  # tension モジュールが未読み込みの場合はスキップ
+    
+    return my_info + other_info + news_info + tension_info

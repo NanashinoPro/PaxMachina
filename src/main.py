@@ -579,6 +579,14 @@ def main():
             
         engine.advance_time()
         
+        # 10.5 地図レンダリング
+        try:
+            from map.renderer import render_turn_map
+            map_path = render_turn_map(world_state, output_dir="output/maps")
+            logger.sys_log(f"[地図] ターン{world_state.turn - 1}の地図を出力: {map_path}")
+        except Exception as map_err:
+            logger.sys_log(f"[地図エラー] {map_err}", "WARNING")
+        
         # ターン進行のウェイト
         print("\n" + "="*50 + "\n")
         time.sleep(3)

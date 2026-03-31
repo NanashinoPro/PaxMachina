@@ -160,6 +160,10 @@ class WorldEngine(
         # 1. 内政の反映
         for country_name, action in actions.items():
             self._process_domestic(country_name, action)
+        
+        # 1.5. 軍事配備の更新（防衛大臣 → 大統領の最終決定を反映）
+        self._process_military_deployments(actions)
+        
         for country_name, action in actions.items():
             self._process_diplomacy_and_espionage(country_name, action)
         
@@ -171,6 +175,17 @@ class WorldEngine(
             
         # 3. 貿易と制裁の処理 (Gravity Model & Sanctions Damage applying)
         self._process_trade_and_sanctions()
+        
+        # 3.5. 緊張度効果の適用 (Mueller Rally + Schultz Audience Cost)
+        try:
+            from engine.tension import apply_tension_effects
+            tension_events = apply_tension_effects(
+                self.state, self.sys_logs_this_turn, self.events_this_turn
+            )
+            for event in tension_events:
+                self.log_event(event, involved_countries=["global"])
+        except Exception as e:
+            self.sys_logs_this_turn.append(f"[緊張度処理エラー] {e}")
             
         # 4. 戦争状態の処理
         self._process_wars()

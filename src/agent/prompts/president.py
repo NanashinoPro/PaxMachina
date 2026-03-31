@@ -96,11 +96,30 @@ def build_president_prompt(country_name: str, country_state: CountryState, world
       "espionage_sabotage_strategy": "手段",
       "reason": "外交決定の理由（30文字以内）"
     }}}}
+  ],
+  "force_allocation": {{{{
+    "army_ratio": 0.0-1.0,
+    "navy_ratio": 0.0-1.0,
+    "air_ratio": 0.0-1.0
+  }}}},
+  "deployments": [
+    {{{{
+      "type": "army"/"navy"/"air",
+      "target_country": "対象国名",
+      "divisions": 整数（陸軍のみ）,
+      "posture": "offensive"/"defensive"/"intimidation"（陸軍のみ）,
+      "fortify": "none"/"light"/"heavy"（陸軍のみ）,
+      "fleets": 整数（海軍のみ）,
+      "naval_mission": "patrol"/"show_of_force"/...（海軍のみ）,
+      "squadrons": 整数（空軍のみ）,
+      "air_mission": "air_superiority"/"ground_support"/...（空軍のみ）
+    }}}}
   ]
 }}}}
 ```
 ※ `diplomatic_policies` は相手国の数だけ配列に入れてください。行動がない国は対象外でよいです。防衛大臣の `espionage_targets` の内容もここに統合してください。
 ※ 防衛大臣が `war_commitment_ratio` を提案している場合、交戦相手国のdiplomatic_policyにその値を反映してください。
 ※ **多国間首脳会談**: `propose_multilateral_summit: true` + `summit_participants: ["国A", "国B", ...]` で複数国を招待できます。招待された国は翌ターンに `accept_summit: true` で参加を表明します。
+※ **軍事配備**: 防衛大臣の `force_allocation` と `deployments` の提案をそのまま採用するか、大統領として修正してください。
 """
     return common_ctx + instructions

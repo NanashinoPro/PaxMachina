@@ -1,5 +1,10 @@
 import random
+from typing import Dict
 
+from models import (
+    AgentAction, MilitaryDeploymentState, ForceAllocation,
+    MilitaryDeploymentOrder, DeploymentType, NavalMission, AirMission
+)
 from .constants import (
     DEFENDER_ADVANTAGE_MULTIPLIER,
     MIN_COMMITMENT_RATIO,
@@ -7,6 +12,126 @@ from .constants import (
 )
 
 class MilitaryMixin:
+    
+    def _process_military_deployments(self, actions: Dict[str, AgentAction]):
+        """全国のAI出力から軍事配備状態を更新（バリデーション付き）"""
+        for country_name, action in actions.items():
+            country = self.state.countries.get(country_name)
+            if not country:
+                continue
+            
+            # force_allocation の更新（指定があれば）
+            if action.force_allocation:
+                fa = action.force_allocation
+                total = fa.army_ratio + fa.navy_ratio + fa.air_ratio
+                if total > 0:
+                    # 合計が1.0を超える場合は正規化
+                    if total > 1.0:
+                        fa.army_ratio /= total
+                        fa.navy_ratio /= total
+                        fa.air_ratio /= total
+                    # 海岸線がない国はnavy_ratio=0
+                    if not country.has_coastline and fa.navy_ratio > 0:
+                        surplus = fa.navy_ratio
+                        fa.navy_ratio = 0.0
+                        fa.army_ratio += surplus * 0.7
+                        fa.air_ratio += surplus * 0.3
+                        self.sys_logs_this_turn.append(
+                            f"[{country_name} 配備] 内陸国のため海軍比率を陸空に再配分"
+                        )
+                    country.military_deployment.force_allocation = fa
+            
+            # ユニット上限の計算
+            fa = country.military_deployment.force_allocation
+            mil = country.military
+            gdp_per_capita = country.economy / max(0.01, country.population)
+            
+            # 陸軍: 師団数 = (軍事力 × 陸軍比率) / (一人当たりGDP × 3.4) × 1000 / 10000
+            total_personnel = mil * fa.army_ratio / max(1.0, gdp_per_capita * 3.4)
+            max_divisions = max(1, int(total_personnel * 1000 / 10000))
+            
+            # 海軍: 艦隊数
+            naval_power = mil * fa.navy_ratio
+            max_fleets = max(0, int(naval_power / 50)) if country.has_coastline else 0
+            
+            # 空軍: 飛行隊数
+            air_power = mil * fa.air_ratio
+            max_squadrons = max(0, int(air_power / 30))
+            
+            # deployments のバリデーションとスケールダウン
+            valid_deployments = []
+            total_divs = 0
+            total_fleets_used = 0
+            total_sq = 0
+            
+            # 戦争中かどうかの判定
+            at_war_with = set()
+            for war in self.state.active_wars:
+                if war.aggressor == country_name:
+                    at_war_with.add(war.defender)
+                elif war.defender == country_name:
+                    at_war_with.add(war.aggressor)
+            
+            for d in action.deployments:
+                # 対象国が存在するか確認
+                if d.target_country not in self.state.countries:
+                    self.sys_logs_this_turn.append(
+                        f"[{country_name} 配備エラー] 対象国 '{d.target_country}' が存在しません。スキップ"
+                    )
+                    continue
+                
+                is_at_war_with_target = d.target_country in at_war_with
+                d_type = d.type.value if hasattr(d.type, 'value') else str(d.type)
+                
+                if d_type == "army":
+                    if total_divs + d.divisions > max_divisions:
+                        d.divisions = max(0, max_divisions - total_divs)
+                    total_divs += d.divisions
+                    if d.divisions > 0:
+                        valid_deployments.append(d)
+                        
+                elif d_type == "navy":
+                    if not country.has_coastline:
+                        continue
+                    # 戦時のみミッションのチェック
+                    if d.naval_mission and d.naval_mission.value in (
+                        "blockade", "naval_engagement", "amphibious_support", "shore_bombardment"
+                    ) and not is_at_war_with_target:
+                        d.naval_mission = NavalMission.PATROL
+                        self.sys_logs_this_turn.append(
+                            f"[{country_name} 配備] 戦時のみミッション → patrol にフォールバック (対{d.target_country})"
+                        )
+                    if total_fleets_used + d.fleets > max_fleets:
+                        d.fleets = max(0, max_fleets - total_fleets_used)
+                    total_fleets_used += d.fleets
+                    if d.fleets > 0:
+                        valid_deployments.append(d)
+                        
+                elif d_type == "air":
+                    # 戦時のみミッションのチェック
+                    if d.air_mission and d.air_mission.value in (
+                        "ground_support", "strategic_bombing"
+                    ) and not is_at_war_with_target:
+                        d.air_mission = AirMission.AIR_SUPERIORITY
+                        self.sys_logs_this_turn.append(
+                            f"[{country_name} 配備] 戦時のみミッション → air_superiority にフォールバック (対{d.target_country})"
+                        )
+                    if total_sq + d.squadrons > max_squadrons:
+                        d.squadrons = max(0, max_squadrons - total_sq)
+                    total_sq += d.squadrons
+                    if d.squadrons > 0:
+                        valid_deployments.append(d)
+            
+            # 配備状態の更新
+            country.military_deployment.deployments = valid_deployments
+            
+            self.sys_logs_this_turn.append(
+                f"[{country_name} 配備完了] "
+                f"陸軍: {total_divs}/{max_divisions}師団, "
+                f"海軍: {total_fleets_used}/{max_fleets}艦隊, "
+                f"空軍: {total_sq}/{max_squadrons}飛行隊, "
+                f"配備先: {len(valid_deployments)}件"
+            )
     def _process_wars(self):
         surviving_wars = []
         
