@@ -46,6 +46,7 @@ class CountryState(BaseModel):
     
     
     # 内政情報
+    has_dissolution_power: bool = Field(False, description="【民主主義のみ】議会解散権の有無。議院内閣制の国はTrue、厳格な三権分立（大統領制）の国はFalse")
     turns_until_election: Optional[int] = Field(None, description="【民主主義のみ】次回の選挙までのターン数")
     rebellion_risk: float = Field(0.0, description="【専制主義等】現在の反乱発生率")
     trade_deficit_counter: int = Field(0, description="貿易赤字が継続しているターン数（産業空洞化ペナルティ用）")
@@ -77,6 +78,7 @@ class DomesticAction(BaseModel):
     invest_intelligence: float = Field(0.0, description="諜報・技術開発への投資割合（0.0-1.0。諜報レベルを蓄積し、諜報活動の成功率を向上させる）")
     invest_education_science: float = Field(0.0, description="教育・科学技術への投資割合（0.0-1.0）。人的資本を蓄積し、長期的な経済成長バフを生み出す")
     target_tariff_rates: Dict[str, float] = Field(default_factory=dict, description="各国に対する目標関税率。キーは国名、値は関税率（0.0〜、上限なし）。財務大臣が決定。")
+    dissolve_parliament: bool = Field(False, description="【民主主義国家のみ】議会解散権を行使するか。解散前支持率の確率で成功し支持率が回復するが、失敗すれば新政権が誕生する。選挙費用としてGDPの0.01〜0.02%が予算から天引きされる")
     reason: str = Field(..., max_length=50, description="この内政決定の簡潔な理由（30文字以内厳守）")
 
 class DiplomaticAction(BaseModel):
@@ -103,9 +105,13 @@ class DiplomaticAction(BaseModel):
     lift_sanctions: bool = Field(False, description="経済制裁を解除するか")
     
     # 首脳会談
-    propose_summit: bool = Field(False, description="対象国との首脳会談を提案するか")
-    accept_summit: bool = Field(False, description="前のターンに相手から提案された首脳会談を受諾するか")
+    propose_summit: bool = Field(False, description="対象国との2国間首脳会談を提案するか")
+    accept_summit: bool = Field(False, description="前のターンに相手から提案された首脳会談（2国間・多国間いずれも）を受諾するか")
     summit_topic: Optional[str] = Field(None, description="首脳会談で議論したい議題（提案または受諾時のみ記載）")
+    
+    # 多国間首脳会談
+    propose_multilateral_summit: bool = Field(False, description="複数国が参加する多国間首脳会談を提案するか。ホスト国としてsummit_participantsに招待国リストを指定する")
+    summit_participants: List[str] = Field(default_factory=list, description="多国間首脳会談に招待する国名のリスト（propose_multilateral_summit時のみ。上限なし、全参加国可能）")
     
     # 軍事侵攻比率の変更
     war_commitment_ratio: Optional[float] = Field(None, ge=0.1, le=1.0, description="交戦中の場合、この戦争に投入する軍事力の比率を変更する（0.1〜1.0。未指定なら現状維持）")
@@ -157,11 +163,13 @@ class AllianceProposal(BaseModel):
     target: str = Field(..., description="提案された国")
 
 class SummitProposal(BaseModel):
-    """首脳会談の保留中の提案"""
+    """首脳会談の保留中の提案（2国間・多国間兼用）"""
     proposer: str
-    target: str
+    target: str = Field("", description="2国間会談の場合の対象国。多国間会談の場合は空文字")
     topic: str
     is_private: bool = Field(False, description="当該会談を非公開で行うか（他国には会談したことすら秘匿される）")
+    participants: List[str] = Field(default_factory=list, description="多国間会談の参加国リスト（ホスト国を含む全参加国）。空の場合は2国間会談")
+    accepted_participants: List[str] = Field(default_factory=list, description="受諾済みの参加国リスト")
 
 class AnnexationProposal(BaseModel):
     """平和的統合の保留中の提案"""

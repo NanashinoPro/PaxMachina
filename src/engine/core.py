@@ -162,6 +162,12 @@ class WorldEngine(
             self._process_domestic(country_name, action)
         for country_name, action in actions.items():
             self._process_diplomacy_and_espionage(country_name, action)
+        
+        # 多国間会談: 受諾者が2名以上集まった提案を実行キューに移動
+        for s in list(self.state.pending_summits):
+            if s.participants and len(s.accepted_participants) >= 2:
+                self.summits_to_run_this_turn.append(s)
+                self.state.pending_summits.remove(s)
             
         # 3. 貿易と制裁の処理 (Gravity Model & Sanctions Damage applying)
         self._process_trade_and_sanctions()

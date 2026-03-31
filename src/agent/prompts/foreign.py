@@ -1,8 +1,17 @@
+from typing import Dict, Optional
 from models import WorldState, CountryState
 from agent.prompts.base import build_common_context
 
-def build_foreign_minister_prompt(country_name: str, country_state: CountryState, world_state: WorldState, past_news: list = None) -> str:
+def build_foreign_minister_prompt(country_name: str, country_state: CountryState, world_state: WorldState, past_news: list = None, analyst_reports: Optional[Dict[str, str]] = None) -> str:
     common_ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="外務大臣")
+    
+    # 分析官からの各国レポートを挿入
+    analyst_section = ""
+    if analyst_reports:
+        analyst_section = "\n---📋【分析官からの各国分析レポート】📋---\n"
+        analyst_section += "以下は情報分析官(flash-lite)が各対象国について作成した包括的分析です。これらを踏まえて外交方針を策定してください。\n\n"
+        for target_name, report in analyst_reports.items():
+            analyst_section += f"▼ 対{target_name}分析レポート:\n{report}\n\n"
     
     instructions = """
 あなたの役目は、他国の情報や世界情勢を踏まえて、自国の利益と発展を最大化するための「外交方針」を専門的に策定することです。
@@ -54,6 +63,8 @@ def build_foreign_minister_prompt(country_name: str, country_state: CountryState
       "propose_summit": bool,
       "summit_topic": "議題",
       "accept_summit": bool,
+      "propose_multilateral_summit": bool,
+      "summit_participants": ["招待国名1", "招待国名2", ...],
       "aid_amount_economy": 0.0,
       "aid_amount_military": 0.0,
       "aid_acceptance_ratio": 1.0,
@@ -61,6 +72,7 @@ def build_foreign_minister_prompt(country_name: str, country_state: CountryState
     }
   ]
 }
-※ diplomatic_policies は相手国の数だけ配列に入れてください。行動がない国は対象外でよいです。
+※ `diplomatic_policies` は相手国の数だけ配列に入れてください。行動がない国は対象外でよいです。
+※ **多国間首脳会談**: `propose_multilateral_summit: true` + `summit_participants: ["国A", "国B", ...]` で複数国を招待する多国間会談を提案できます。招待された国は翌ターンに `accept_summit: true` で参加を表明します。2国以上が受諾すれば開催されます。
 """
-    return common_ctx + instructions
+    return common_ctx + analyst_section + instructions

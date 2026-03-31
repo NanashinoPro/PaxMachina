@@ -147,8 +147,8 @@ class EventsMixin:
             self.log_event(f"🔄 【政権交代】{country_name}の選挙で現政権が敗北し、新たな指導者が選出されました。", involved_countries=[country_name])
             self.sys_logs_this_turn.append(f"[{country_name} 選挙] 乱数 {roll:.1f} > 支持率 {country.approval_rating:.1f} により落選")
             
-            # 敗北時の新政権の支持率は期待値として 100.0 - Approval にリセット（Option C準拠）
-            new_approval = max(0.0, min(100.0, 100.0 - country.approval_rating))
+            # 敗北時の新政権の支持率: 100 - 旧支持率/2 にリセット
+            new_approval = max(0.0, min(100.0, 100.0 - country.approval_rating / 2.0))
             country.approval_rating = new_approval
             self.sys_logs_this_turn.append(f"[{country_name} 新政権] 新たなハネムーン期間として支持率が {new_approval:.1f}% にリセットされました。")
             country.regime_duration = 0  # 選挙での政権交代によりリセット

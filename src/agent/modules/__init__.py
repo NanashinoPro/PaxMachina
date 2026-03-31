@@ -1,4 +1,4 @@
-from agent.modules.summit import run_summit
+from agent.modules.summit import run_summit, run_multilateral_summit
 from agent.modules.media import (
     GeminiSentimentAnalyzer,
     generate_citizen_sns_posts,
@@ -12,6 +12,7 @@ from agent.modules.intelligence import generate_espionage_report
 
 __all__ = [
     "run_summit",
+    "run_multilateral_summit",
     "GeminiSentimentAnalyzer",
     "generate_citizen_sns_posts",
     "generate_breakthrough_name",

@@ -14,6 +14,7 @@ from agent.ollama_client import OllamaClient
 from models import WorldState, CountryState, AgentAction, DomesticAction
 from logger import SimulationLogger
 
+from agent.prompts.analyst import build_analyst_prompt
 from agent.prompts.foreign import build_foreign_minister_prompt
 from agent.prompts.defense import build_defense_minister_prompt
 from agent.prompts.economic import build_economic_minister_prompt
@@ -215,13 +216,39 @@ class AgentSystem:
         return actions
 
     def _decide_country_action(self, country_name: str, country_state: CountryState, world_state: WorldState, past_news: List[str] = None) -> AgentAction:
-        """閣僚エージェントと大統領エージェントを用いた2段階の意思決定を行う"""
+        """分析官→閣僚→大統領の3段階の意思決定を行う"""
+        
+        # フェーズ0: 分析官による各国分析 (gemini-2.5-flash-lite)
+        analyst_reports = {}
+        other_countries = [name for name in world_state.countries.keys() if name != country_name]
+        
+        if other_countries:
+            self.logger.sys_log(f"[{country_name}] フェーズ0: 分析官による各国分析を開始 ({len(other_countries)}カ国)")
+            for target_name in other_countries:
+                try:
+                    analyst_prompt = build_analyst_prompt(
+                        country_name, country_state, world_state,
+                        target_name, past_news
+                    )
+                    report = self._execute_agent(
+                        country_name, f"分析官(対{target_name})",
+                        analyst_prompt, "analyst",
+                        override_model="gemini-2.5-flash-lite"
+                    )
+                    analyst_reports[target_name] = report
+                    self.logger.sys_log_detail(f"{country_name} Analyst Report (vs {target_name})", report)
+                except Exception as exc:
+                    self.logger.sys_log(f"[{country_name}:分析官(対{target_name})] 推論中に例外発生: {exc}", "ERROR")
+                    analyst_reports[target_name] = "分析データなし（エラー）"
+            
+            self.logger.sys_log(f"[{country_name}] フェーズ0完了: {len(analyst_reports)}カ国の分析レポートを取得")
         
         # フェーズ1: 4大臣によるプロポーザルの逐次生成（メモリ使用量削減のため並列実行を廃止）
-        foreign_prompt = build_foreign_minister_prompt(country_name, country_state, world_state, past_news)
-        defense_prompt = build_defense_minister_prompt(country_name, country_state, world_state, past_news)
+        # 外務・防衛・財務大臣には分析官レポートを渡す
+        foreign_prompt = build_foreign_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=analyst_reports if analyst_reports else None)
+        defense_prompt = build_defense_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=analyst_reports if analyst_reports else None)
         economic_prompt = build_economic_minister_prompt(country_name, country_state, world_state, past_news)
-        finance_prompt = build_finance_minister_prompt(country_name, country_state, world_state, past_news)
+        finance_prompt = build_finance_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=analyst_reports if analyst_reports else None)
 
         proposals = {}
         minister_tasks = [
@@ -287,6 +314,13 @@ class AgentSystem:
         search_tool_a = self._create_search_tool(proposal.proposer, "首脳会談")
         search_tool_b = self._create_search_tool(proposal.target, "首脳会談")
         return summit.run_summit(self._generate_with_retry, self.logger, self.db_manager, proposal, state_a, state_b, world_state, past_news, search_tool_a, search_tool_b)
+
+    def run_multilateral_summit(self, proposal, country_states, world_state, past_news=None) -> Tuple[str, str]:
+        participants = proposal.accepted_participants if proposal.accepted_participants else proposal.participants
+        if proposal.proposer not in participants:
+            participants = [proposal.proposer] + participants
+        search_tools = {p: self._create_search_tool(p, "多国間会談") for p in participants}
+        return summit.run_multilateral_summit(self._generate_with_retry, self.logger, self.db_manager, proposal, country_states, world_state, past_news, search_tools)
 
     def generate_espionage_report(self, attacker_name: str, target_name: str, target_hidden_plans: str, strategy: str) -> Tuple[str, Optional[str]]:
         return intelligence.generate_espionage_report(self._generate_with_retry, self.logger, attacker_name, target_name, target_hidden_plans, strategy)

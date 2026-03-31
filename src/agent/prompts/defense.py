@@ -1,8 +1,17 @@
+from typing import Dict, Optional
 from models import WorldState, CountryState
 from agent.prompts.base import build_common_context
 
-def build_defense_minister_prompt(country_name: str, country_state: CountryState, world_state: WorldState, past_news: list = None) -> str:
+def build_defense_minister_prompt(country_name: str, country_state: CountryState, world_state: WorldState, past_news: list = None, analyst_reports: Optional[Dict[str, str]] = None) -> str:
     common_ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="防衛大臣")
+    
+    # 分析官からの各国レポートを挿入
+    analyst_section = ""
+    if analyst_reports:
+        analyst_section = "\n---📋【分析官からの各国分析レポート】📋---\n"
+        analyst_section += "以下は情報分析官(flash-lite)が各対象国について作成した包括的分析です。これらを踏まえて軍事・諜報方針を策定してください。\n\n"
+        for target_name, report in analyst_reports.items():
+            analyst_section += f"▼ 対{target_name}分析レポート:\n{report}\n\n"
     
     instructions = """
 あなたの役目は、国家の安全保障に責任を持ち、「軍事投資」と「諜報・裏工作」の戦略を策定することです。
@@ -45,4 +54,4 @@ def build_defense_minister_prompt(country_name: str, country_state: CountryState
 }
 ※ espionage_targets は対象国がない場合は空のリストにしてください。
 """
-    return common_ctx + instructions
+    return common_ctx + analyst_section + instructions

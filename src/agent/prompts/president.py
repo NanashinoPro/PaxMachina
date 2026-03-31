@@ -32,7 +32,19 @@ def build_president_prompt(country_name: str, country_state: CountryState, world
    - 同盟国に知られたくない第三国との協議（例：同盟国の敵と密約を結ぶ場合）
    - 国内世論に配慮が必要な譲歩を伴う交渉
    非公開会談（`propose_summit` + `is_private: true`）を使えば、第三国にもメディアにも会談の事実が漏れません。戦略的に極めて重要なツールです。
+"""
 
+    # 議会解散権の説明は、解散権を持つ民主主義国家のみ表示
+    if country_state.has_dissolution_power and country_state.government_type.value == "democracy":
+        instructions += """
+7. **議会解散権**: あなたの国は議会解散権を持っています。支持率が低迷し政策実行費用を満足に確保できない場合、`dissolve_parliament: true` を設定して議会を解散し総選挙を実施できます。
+   - **成功（確率 = 現在の支持率%）**: 支持率が `50 + (解散前支持率)/2` に回復し、選挙タイマもリセットされます。
+   - **失敗**: 新政権が誕生し、新しいイデオロギーが設定されます。支持率は `100 - (解散前支持率)/2` になります。
+   - **コスト**: 解散のたびにGDPの0.01〜0.02%が選挙費用として政府予算から天引きされます。クールダウンはありませんが、乱発すれば予算を圧迫します。
+   - **判断指針**: 支持率が30%を下回り政策実行力が低下している場合は、リスクを取って解散する価値があるかもしれません。ただし失敗すれば政権自体が交代します。
+"""
+
+    instructions += f"""
 以下の拡張されたJSONスキーマに従って最終決定を必ず出力してください。必ずJSONオブジェクトのみで出力すること。
 
 ```json
@@ -52,6 +64,7 @@ def build_president_prompt(country_name: str, country_state: CountryState, world
     "target_tariff_rates": {{{{
       "貿易相手国名": 関税率（0.0以上の数値）
     }}}},
+    "dissolve_parliament": bool（民主主義国家のみ。議会を解散して総選挙を実施する。支持率%の確率で成功し支持率回復。失敗で政権交代。選挙費用としてGDPの0.01〜0.02%が予算から天引き）,
     "reason": "内政決定の理由（30文字以内）"
   }}}},
   "diplomatic_policies": [
@@ -70,6 +83,8 @@ def build_president_prompt(country_name: str, country_state: CountryState, world
       "propose_summit": bool,
       "summit_topic": "議題",
       "accept_summit": bool,
+      "propose_multilateral_summit": bool,
+      "summit_participants": ["招待国名1", "招待国名2", ...],
       "aid_amount_economy": 0.0,
       "aid_amount_military": 0.0,
       "aid_acceptance_ratio": 1.0,
@@ -86,5 +101,6 @@ def build_president_prompt(country_name: str, country_state: CountryState, world
 ```
 ※ `diplomatic_policies` は相手国の数だけ配列に入れてください。行動がない国は対象外でよいです。防衛大臣の `espionage_targets` の内容もここに統合してください。
 ※ 防衛大臣が `war_commitment_ratio` を提案している場合、交戦相手国のdiplomatic_policyにその値を反映してください。
+※ **多国間首脳会談**: `propose_multilateral_summit: true` + `summit_participants: ["国A", "国B", ...]` で複数国を招待できます。招待された国は翌ターンに `accept_summit: true` で参加を表明します。
 """
     return common_ctx + instructions

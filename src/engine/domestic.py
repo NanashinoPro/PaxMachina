@@ -56,6 +56,52 @@ class DomesticMixin:
                     involved_countries=[country_name]
                 )
 
+        # --- 議会解散権の処理（民主主義国家かつ解散権を持つ国のみ） ---
+        dissolution_executed = False
+        if getattr(action.domestic_policy, 'dissolve_parliament', False) and country.government_type == GovernmentType.DEMOCRACY and country.has_dissolution_power:
+            dissolution_executed = True
+            old_approval = country.approval_rating
+            
+            # 選挙費用: GDP × 0.01〜0.02% を予算から天引き
+            election_cost = country.economy * random.uniform(0.0001, 0.0002)
+            country.government_budget = max(0.0, country.government_budget - election_cost)
+            
+            self.log_event(f"🗳️ {country_name}の指導者が議会解散を宣言しました！総選挙が実施されます。（現支持率: {old_approval:.1f}%, 選挙費用: {election_cost:.2f}）", involved_countries=[country_name, "global"])
+            
+            # 判定: 乱数(0〜100) <= 解散前支持率 → 成功
+            roll = random.uniform(0.0, 100.0)
+            
+            if roll <= old_approval:
+                # 成功（再任）: 支持率 = 50 + 解散前支持率/2
+                new_approval = min(100.0, 50.0 + old_approval / 2.0)
+                country.approval_rating = new_approval
+                # 選挙タイマリセット
+                if country.turns_until_election is not None:
+                    country.turns_until_election = 16
+                
+                self.log_event(f"✅ 【解散総選挙結果】{country_name}の現政権が国民の信任を勝ち取り、再任されました！（支持率: {old_approval:.1f}% → {new_approval:.1f}%）", involved_countries=[country_name])
+                self.sys_logs_this_turn.append(f"[{country_name} 議会解散] 乱数 {roll:.1f} <= 支持率 {old_approval:.1f} により再任。新支持率: {new_approval:.1f}%。選挙費用: {election_cost:.2f}")
+            else:
+                # 失敗（新政権誕生）: 支持率 = 100 - 解散前支持率/2
+                new_approval = max(0.0, min(100.0, 100.0 - old_approval / 2.0))
+                country.approval_rating = new_approval
+                country.regime_duration = 0
+                
+                # 選挙タイマリセット
+                if country.turns_until_election is not None:
+                    country.turns_until_election = 16
+                
+                # イデオロギーの刷新フラグ
+                country.ideology = f"[新政権樹立フェーズ] 解散総選挙で旧政権({country.ideology})が敗北。新政府の指針を策定中"
+                country.hidden_plans = "解散総選挙による政権交代。新たな国家戦略を立案せよ。"
+                
+                self.log_event(f"🔄 【解散総選挙・政権交代】{country_name}の解散総選挙で現政権が敗北！新たな指導者が選出されました。（支持率: {old_approval:.1f}% → {new_approval:.1f}%）", involved_countries=[country_name, "global"])
+                self.sys_logs_this_turn.append(f"[{country_name} 議会解散] 乱数 {roll:.1f} > 支持率 {old_approval:.1f} により落選。新政権誕生。新支持率: {new_approval:.1f}%。選挙費用: {election_cost:.2f}")
+                
+                # 新政権誕生フラグを立てる（AIプロンプトフェーズで新イデオロギー生成用）
+                if hasattr(self, 'pending_elections'):
+                    self.pending_elections.append(country_name)
+
         # --- 税率調整と政治的コスト（支持率ペナルティ） ---
         old_tax_rate = country.tax_rate
         new_tax_rate = action.domestic_policy.tax_rate

@@ -1,7 +1,8 @@
+from typing import Dict, Optional
 from models import WorldState, CountryState
 from agent.prompts.base import build_common_context
 
-def build_finance_minister_prompt(country_name: str, country_state: CountryState, world_state: WorldState, past_news: list = None) -> str:
+def build_finance_minister_prompt(country_name: str, country_state: CountryState, world_state: WorldState, past_news: list = None, analyst_reports: Optional[Dict[str, str]] = None) -> str:
     common_ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="財務大臣")
     
     # 現在の関税率情報を構築
@@ -14,6 +15,14 @@ def build_finance_minister_prompt(country_name: str, country_state: CountryState
     
     if not tariff_info:
         tariff_info = "  （現在、貿易協定を結んでいる国はありません）\n"
+    
+    # 分析官からの各国レポートを挿入
+    analyst_section = ""
+    if analyst_reports:
+        analyst_section = "\n---📋【分析官からの各国分析レポート】📋---\n"
+        analyst_section += "以下は情報分析官(flash-lite)が各対象国について作成した包括的分析です。関税率の決定に際して、各国との通商関係をこの分析を参考に判断してください。\n\n"
+        for target_name, report in analyst_reports.items():
+            analyst_section += f"▼ 対{target_name}分析レポート:\n{report}\n\n"
     
     instructions = f"""
 あなたの役目は、自国の財政政策（税率と関税率）を専門的に策定する「財務大臣」です。
@@ -73,4 +82,4 @@ NXの算出（重力モデル）:
   "reason": "財政決定の理由（30文字以内）"
 }}
 """
-    return common_ctx + instructions
+    return common_ctx + analyst_section + instructions

@@ -42,6 +42,7 @@ def initialize_world() -> WorldState:
                 initial_population=float(row["population"]),
                 capital_lat=float(row.get("capital_lat", 0.0) or 0.0),
                 capital_lon=float(row.get("capital_lon", 0.0) or 0.0),
+                has_dissolution_power=row.get("has_dissolution_power", "").strip().lower() == "true",
                 hidden_plans=""
             )
 
@@ -451,31 +452,59 @@ def main():
         if engine.summits_to_run_this_turn:
             print("\n🤝 首脳会談が開催されています...")
             for proposal in engine.summits_to_run_this_turn:
-                ca = world_state.countries.get(proposal.proposer)
-                cb = world_state.countries.get(proposal.target)
-                if ca and cb:
-                    # 国家がまだ存在しているか再確認 (engine.process_turnで敗北した可能性)
-                    if proposal.proposer not in world_state.countries or proposal.target not in world_state.countries:
+                is_private_summit = getattr(proposal, 'is_private', False)
+                
+                # 多国間会談の判定
+                if proposal.participants and len(proposal.participants) >= 2:
+                    # 多国間首脳会談
+                    participant_states = {p: world_state.countries[p] for p in proposal.accepted_participants if p in world_state.countries}
+                    if len(participant_states) < 2:
                         continue
-                    summit_news_result, full_summit_log = agent_system.run_summit(proposal, ca, cb, world_state, past_news=past_news_queue)
                     
-                    is_private_summit = getattr(proposal, 'is_private', False)
+                    summit_news_result, full_summit_log = agent_system.run_multilateral_summit(proposal, participant_states, world_state, past_news=past_news_queue)
+                    
+                    participant_names = ", ".join(participant_states.keys())
                     if summit_news_result:
                         world_state.news_events.append(summit_news_result)
-                        logger.display_category_events([summit_news_result], f"首脳会談: {proposal.proposer} & {proposal.target}", style="bold cyan", icon="🤝")
+                        logger.display_category_events([summit_news_result], f"多国間首脳会談: {participant_names}", style="bold cyan", icon="🌐")
                     else:
-                        logger.sys_log(f"[非公開会談完了] {proposal.proposer} & {proposal.target}")
-                        
+                        logger.sys_log(f"[非公開多国間会談完了] {participant_names}")
+                    
                     if not is_private_summit:
                         recent_summit_logs.append(full_summit_log)
-                        
+                    
                     world_state.summit_logs.append({
                         "turn": world_state.turn,
-                        "participants": [proposal.proposer, proposal.target],
+                        "participants": list(participant_states.keys()),
                         "topic": proposal.topic,
                         "log": full_summit_log,
                         "is_private": is_private_summit
                     })
+                else:
+                    # 2国間首脳会談（既存ロジック）
+                    ca = world_state.countries.get(proposal.proposer)
+                    cb = world_state.countries.get(proposal.target)
+                    if ca and cb:
+                        if proposal.proposer not in world_state.countries or proposal.target not in world_state.countries:
+                            continue
+                        summit_news_result, full_summit_log = agent_system.run_summit(proposal, ca, cb, world_state, past_news=past_news_queue)
+                        
+                        if summit_news_result:
+                            world_state.news_events.append(summit_news_result)
+                            logger.display_category_events([summit_news_result], f"首脳会談: {proposal.proposer} & {proposal.target}", style="bold cyan", icon="🤝")
+                        else:
+                            logger.sys_log(f"[非公開会談完了] {proposal.proposer} & {proposal.target}")
+                            
+                        if not is_private_summit:
+                            recent_summit_logs.append(full_summit_log)
+                            
+                        world_state.summit_logs.append({
+                            "turn": world_state.turn,
+                            "participants": [proposal.proposer, proposal.target],
+                            "topic": proposal.topic,
+                            "log": full_summit_log,
+                            "is_private": is_private_summit
+                        })
         else:
             print("今期、首脳会談は行われませんでした。")
                     

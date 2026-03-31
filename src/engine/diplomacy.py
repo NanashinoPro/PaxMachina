@@ -249,10 +249,10 @@ class DiplomacyMixin:
                 else:
                     self.log_event(f"✉️ {country_name}が{target_name}に対して首脳会談を提案しました。議題: {dip.summit_topic}", involved_countries=[country_name, target_name])
 
-            # 首脳会談の受諾
+            # 首脳会談の受諾（2国間・多国間共通）
             if dip.accept_summit:
-                # 前ターンからの提案リストに探す
-                matched = [s for s in self.state.pending_summits if s.proposer == target_name and s.target == country_name]
+                # 2国間会談の受諾
+                matched = [s for s in self.state.pending_summits if s.proposer == target_name and s.target == country_name and not s.participants]
                 if matched:
                     proposal = matched[0]
                     self.summits_to_run_this_turn.append(proposal)
@@ -263,6 +263,46 @@ class DiplomacyMixin:
                     else:
                         self.log_event(f"✅ {country_name}が{target_name}からの首脳会談の提案（議題: {proposal.topic}）を受諾しました。会談が開催されます。", involved_countries=[country_name, target_name, "global"])
                     self.state.pending_summits.remove(proposal)
+                
+                # 多国間会談の受諾（自国がparticipantsに含まれている提案を探す）
+                for s in list(self.state.pending_summits):
+                    if s.participants and country_name in s.participants and country_name not in s.accepted_participants:
+                        s.accepted_participants.append(country_name)
+                        if s.is_private:
+                            self.sys_logs_this_turn.append(f"[多国間非公開会談受諾] {country_name}が{s.proposer}主催の多国間会談を受諾。")
+                        else:
+                            self.log_event(f"✅ {country_name}が{s.proposer}主催の多国間首脳会談（議題: {s.topic}）への参加を表明しました。", involved_countries=[country_name, s.proposer])
+            
+            # 多国間首脳会談の提案
+            if getattr(dip, 'propose_multilateral_summit', False):
+                summit_participants_list = getattr(dip, 'summit_participants', [])
+                if not summit_participants_list:
+                    # summit_participantsが空の場合、target_countryを唯一の参加者として扱う
+                    summit_participants_list = [target_name]
+                
+                # ホスト国を含む全参加国リストを構築
+                all_participants = [country_name] + [p for p in summit_participants_list if p != country_name and p in self.state.countries]
+                
+                if len(all_participants) >= 2:
+                    is_private_summit = getattr(dip, 'is_private', False)
+                    new_proposal = SummitProposal(
+                        proposer=country_name,
+                        target="",
+                        topic=dip.summit_topic or "多国間協議",
+                        is_private=is_private_summit,
+                        participants=all_participants,
+                        accepted_participants=[country_name]  # ホスト国は自動受諾
+                    )
+                    self.state.pending_summits.append(new_proposal)
+                    
+                    invited_names = ", ".join(p for p in all_participants if p != country_name)
+                    if is_private_summit:
+                        self.sys_logs_this_turn.append(f"[非公開多国間会談提案] {country_name} -> {invited_names}: {new_proposal.topic}")
+                        for p in all_participants:
+                            if p != country_name and p in self.state.countries:
+                                self.state.countries[p].private_messages.append(f"【{country_name}からの極秘の多国間会談招待】\n議題: {new_proposal.topic}\n参加国: {', '.join(all_participants)}")
+                    else:
+                        self.log_event(f"🌐 {country_name}が{invited_names}を招待し、多国間首脳会談を提案しました。議題: {new_proposal.topic}", involved_countries=all_participants)
                     
             # 平和的統合（吸収合併）の提案
             if getattr(dip, 'propose_annexation', False):
