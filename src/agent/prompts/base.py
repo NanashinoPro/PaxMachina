@@ -215,4 +215,19 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
         filtered_events = _filter_news_for_country(world_state.news_events[-20:], country_name, all_country_names)
         news_info = "---直近のニュース---\n" + "\n".join(f"- {n}" for n in filtered_events) + "\n\n"
         
-    return my_info + other_info + news_info
+    # パワー・バキューム・オークション情報の表示
+    vacuum_info = ""
+    if hasattr(world_state, 'pending_vacuum_auctions') and world_state.pending_vacuum_auctions:
+        vacuum_info = "\n---\U0001f3af【パワー・バキューム・オークション（要判断）】\U0001f3af---\n"
+        vacuum_info += "以下の新興国家が分裂により誕生しました。軍事介入して吸収（併合）するかどうかを判断してください。\n"
+        vacuum_info += "diplomatic_policies 内の該当国に対して `vacuum_bid`（0.0〜自国軍事力の数値）を設定してください。\n"
+        vacuum_info += "vacuum_bid = 0 は「介入しない」を意味します。ベット額が高いほど吸収(併合)の確率が上がりますが、\n"
+        vacuum_info += "失敗した場合でもベット額は消費されません。\n"
+        vacuum_info += "新国家は自国の全軍事力で独立を防衛します。地理的距離が遠いと介入コストが高くなります。\n\n"
+        for auction in world_state.pending_vacuum_auctions:
+            new_c = world_state.countries.get(auction["new_country"])
+            if new_c:
+                vacuum_info += f"  \U0001f195 {auction['new_country']}（旧: {auction['old_country']}から分裂）\n"
+                vacuum_info += f"     軍事力: {new_c.military:.1f}, 経済力: {new_c.economy:.1f}, 人口: {new_c.population:.1f}百万人\n\n"
+        
+    return my_info + other_info + news_info + vacuum_info

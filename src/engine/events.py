@@ -5,6 +5,7 @@ from models import CountryState, GovernmentType, WarState, DisasterEvent, Breakt
 from .constants import (
     GLOBAL_DISASTERS, NATIONAL_DISASTERS, EARTH_LAND_AREA,
     FRAGMENTATION_BASE_INSTABILITY_MULTIPLIER, FRAGMENTATION_SIZE_FACTOR_MULTIPLIER, FRAGMENTATION_TRADE_FACTOR_MULTIPLIER,
+    FRAGMENTATION_INSTABILITY_THRESHOLD, FRAGMENTATION_COOLDOWN_TURNS,
     COUP_BUDGET_RATIO_MIN, COUP_BUDGET_RATIO_MAX
 )
 
@@ -21,6 +22,12 @@ class EventsMixin:
         # 反乱と選挙の進行（Alesina-Spolaore分裂判定もここに含まれる）
         # 分裂で新しい国が self.state.countries に追加されるため、list() でコピーして回す
         for name, country in list(self.state.countries.items()):
+            # 【新設】クールダウン期間: 新政権発足後4ターン（1年）は分裂・クーデター免除
+            # [学術的根拠] Polity IV regime durability coding: 政権の安定性は最低で1年の観測期間を要する
+            if country.regime_duration <= FRAGMENTATION_COOLDOWN_TURNS:
+                self.sys_logs_this_turn.append(f"[{name} クールダウン] regime_duration={country.regime_duration} <= {FRAGMENTATION_COOLDOWN_TURNS}。分裂・クーデター判定をスキップ。")
+                continue
+            
             # 支持率低下による反乱リスク
             if country.approval_rating < 30.0:
                 country.rebellion_risk += 5.0
@@ -161,31 +168,40 @@ class EventsMixin:
         # 基礎不安定性 (どれだけマイナスまで支持率が振り切れていたか等の不満度。0-100程度)
         base_instability = max(0.0, 30.0 - country.approval_rating) + min(100.0, country.rebellion_risk)
         
-        # 面積（国土規模）による多様性/異質性コスト（Alesina-Spolaore: サイズによる分裂圧力）
-        # ※ここでは面積の絶対値をベースに係数をかける（最大+30%程度）
-        size_factor = min(30.0, country.area * FRAGMENTATION_SIZE_FACTOR_MULTIPLIER)
-        
-        # 自由貿易の恩恵（Alesina-Spolaore: 貿易網が発達しているほど小国が生き返りやすいため分裂圧力増）
-        # 対象国が結んでいる貿易協定の数をカウント
-        trade_count = sum(1 for t in self.state.active_trades if t.country_a == country_name or t.country_b == country_name)
-        trade_factor = trade_count * FRAGMENTATION_TRADE_FACTOR_MULTIPLIER
-        
-        # 分裂確率 P_frag
-        p_frag = min(100.0, (base_instability * FRAGMENTATION_BASE_INSTABILITY_MULTIPLIER) + size_factor + trade_factor)
-        
-        # 民主主義の場合は武力弾圧を行わないため相対的に分裂のハードルが低い(平和的独立)
-        if country.government_type == GovernmentType.DEMOCRACY:
-            p_frag += 10.0
-        else: # 専制主義は流血を辞さず抑え込むため分裂発生率はやや低い
-            p_frag -= 10.0
+        # 【新設】不安定性しきい値ゲート: base_instability < 40 の場合、分裂判定をスキップ
+        # [学術的根拠] Goldstone et al. (2010) Political Instability Task Force:
+        # 国家崩壊は単一要因ではなく、複数の不安定要因が同時に蓄積した場合にのみ発生する
+        if base_instability < FRAGMENTATION_INSTABILITY_THRESHOLD:
+            self.sys_logs_this_turn.append(
+                f"[{country_name} 分裂判定スキップ] base_instability={base_instability:.1f} < "
+                f"閾値{FRAGMENTATION_INSTABILITY_THRESHOLD}。通常のクーデターに進行。"
+            )
+        else:
+            # 面積（国土規模）による多様性/異質性コスト（Alesina-Spolaore: サイズによる分裂圧力）
+            # ※ここでは面積の絶対値をベースに係数をかける（最大+30%程度）
+            size_factor = min(30.0, country.area * FRAGMENTATION_SIZE_FACTOR_MULTIPLIER)
             
-        p_frag = max(0.0, min(100.0, p_frag))
-        
-        is_fragmentation = random.uniform(0.0, 100.0) < p_frag
-        
-        if is_fragmentation:
-            self._execute_fragmentation(country_name, country, base_instability)
-            return
+            # 自由貿易の恩恵（Alesina-Spolaore: 貿易網が発達しているほど小国が生き返りやすいため分裂圧力増）
+            # 対象国が結んでいる貿易協定の数をカウント
+            trade_count = sum(1 for t in self.state.active_trades if t.country_a == country_name or t.country_b == country_name)
+            trade_factor = trade_count * FRAGMENTATION_TRADE_FACTOR_MULTIPLIER
+            
+            # 分裂確率 P_frag
+            p_frag = min(100.0, (base_instability * FRAGMENTATION_BASE_INSTABILITY_MULTIPLIER) + size_factor + trade_factor)
+            
+            # 民主主義の場合は武力弾圧を行わないため相対的に分裂のハードルが低い(平和的独立)
+            if country.government_type == GovernmentType.DEMOCRACY:
+                p_frag += 10.0
+            else: # 専制主義は流血を辞さず抑え込むため分裂発生率はやや低い
+                p_frag -= 10.0
+                
+            p_frag = max(0.0, min(100.0, p_frag))
+            
+            is_fragmentation = random.uniform(0.0, 100.0) < p_frag
+            
+            if is_fragmentation:
+                self._execute_fragmentation(country_name, country, base_instability)
+                return
 
         # --- 2. 通常のクーデター（政権交代のみ） ---
         self.log_event(f"🔄 【政権交代】{country_name}にてクーデターが成功し、新政府が樹立されました！", involved_countries=[country_name, "global"])
@@ -323,6 +339,20 @@ class EventsMixin:
             
         # 世界に追加
         self.state.countries[new_name] = new_country
+        
+        # 【新設】パワー・バキューム・オークションを登録 (Tullock CSF方式)
+        # [学術的根拠] Tullock (1980), Hirshleifer (1989): コンテスト成功関数。
+        # 分裂で誕生した新国家に対し、各大国がベットする軍事介入オークションを開催。
+        # 新国家は自国の全軍事力で独立を防衛する。
+        self.state.pending_vacuum_auctions.append({
+            "new_country": new_name,
+            "old_country": old_name,
+            "new_military": new_country.military,
+        })
+        self.sys_logs_this_turn.append(
+            f"[パワー・バキューム] {new_name}(旧:{old_name}) が誕生。"
+            f"軍事力{new_country.military:.1f}で独立防衛。各国のベットを待機中。"
+        )
         
         # 5. 外交関係（平和的独立か、内戦か）
         if old_country.government_type == GovernmentType.DEMOCRACY:

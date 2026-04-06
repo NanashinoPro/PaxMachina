@@ -459,3 +459,121 @@ class DiplomacyMixin:
         self.state.pending_summits = [s for s in self.state.pending_summits if s.proposer != absorbed_name and s.target != absorbed_name]
         self.state.pending_alliances = [a for a in self.state.pending_alliances if a.proposer != absorbed_name and a.target != absorbed_name]
         self.state.pending_annexations = [a for a in self.state.pending_annexations if a.proposer != absorbed_name and a.target != absorbed_name]
+
+    def _resolve_vacuum_auctions(self, actions):
+        """パワー・バキューム・オークションの解決（Tullock Contest Success Function）
+        
+        [学術的根拠]
+        - Tullock, G. (1980). Efficient Rent Seeking.
+        - Hirshleifer, J. (1989). Conflict and Rent-Seeking Success Functions.
+        - Wolfers & Morgenthau: パワー・バキュームは周辺大国を引き寄せる重力を持つ。
+        
+        各大国のベット（vacuum_bid）と新国家の軍事力（独立防衛ベット）を集計し、
+        Tullock CSF で確率的に吸収 or 独立を決定する。
+        """
+        import math
+        
+        for auction in list(self.state.pending_vacuum_auctions):
+            new_name = auction["new_country"]
+            old_name = auction["old_country"]
+            new_mil = auction["new_military"]  # 新国家の独立防衛ベット（全軍事力）
+            
+            if new_name not in self.state.countries:
+                continue
+            
+            # 全国のベットを集計
+            bids = {}
+            for country_name, action in actions.items():
+                if country_name == new_name:
+                    continue
+                if country_name not in self.state.countries:
+                    continue
+                    
+                for dip in action.diplomatic_policies:
+                    if dip.target_country == new_name:
+                        raw_bid = getattr(dip, 'vacuum_bid', 0.0)
+                        if raw_bid <= 0:
+                            continue
+                        
+                        # ベット上限 = 自国軍事力
+                        bid = min(raw_bid, self.state.countries[country_name].military)
+                        
+                        # 地理的距離ペナルティ（遠い国ほど介入コストが高い）
+                        distance = self._get_distance(country_name, new_name)
+                        distance_penalty = 1.0 / (1.0 + distance / 5000.0)
+                        
+                        # 同盟関係ボーナス
+                        rel = self._get_relation(country_name, old_name)
+                        if rel == RelationType.ALLIANCE:
+                            alliance_bonus = 1.5  # 同盟国の混乱 → 保護下に置く動機
+                        elif rel == RelationType.AT_WAR:
+                            alliance_bonus = 2.0  # 敵国の分裂 → 漁夫の利
+                        else:
+                            alliance_bonus = 1.0
+                        
+                        effective_bid = bid * distance_penalty * alliance_bonus
+                        bids[country_name] = {
+                            "raw_bid": bid,
+                            "effective_bid": effective_bid,
+                            "distance": distance,
+                            "distance_penalty": distance_penalty,
+                            "alliance_bonus": alliance_bonus,
+                        }
+            
+            # Tullock CSF で確率計算
+            total_effective = sum(b["effective_bid"] for b in bids.values()) + new_mil
+            if total_effective <= 0:
+                continue
+            
+            # 確率テーブルを作成
+            outcomes = {}
+            outcomes["🗽独立"] = new_mil / total_effective
+            for bidder, bid_info in bids.items():
+                outcomes[bidder] = bid_info["effective_bid"] / total_effective
+            
+            # ログ出力（確率テーブル）
+            prob_log = ", ".join([f"{k}: {v:.1%}" for k, v in outcomes.items()])
+            self.sys_logs_this_turn.append(
+                f"[パワー・バキューム・オークション] {new_name} (旧:{old_name}): {prob_log}"
+            )
+            for bidder, bid_info in bids.items():
+                self.sys_logs_this_turn.append(
+                    f"  └ {bidder}: raw_bid={bid_info['raw_bid']:.1f}, "
+                    f"距離={bid_info['distance']:.0f}km(x{bid_info['distance_penalty']:.2f}), "
+                    f"同盟補正(x{bid_info['alliance_bonus']:.1f}) → effective={bid_info['effective_bid']:.1f}"
+                )
+            
+            # 乱数で決定
+            roll = random.random()
+            cumulative = 0.0
+            winner = "🗽独立"
+            for name, prob in outcomes.items():
+                cumulative += prob
+                if roll < cumulative:
+                    winner = name
+                    break
+            
+            self.sys_logs_this_turn.append(
+                f"[パワー・バキューム結果] roll={roll:.4f} → 勝者: {winner}"
+            )
+            
+            if winner == "🗽独立":
+                self.log_event(
+                    f"🗽 【独立確定】{new_name}は全ての大国の介入を退け、"
+                    f"独立を勝ち取りました！（独立確率: {outcomes['🗽独立']:.1%}）",
+                    involved_countries=[new_name, "global"]
+                )
+            else:
+                # 吸収処理
+                absorb_prob = outcomes.get(winner, 0.0)
+                self.log_event(
+                    f"🏴 【日和見的併合】{winner}が{new_name}の混乱に乗じて軍事介入！"
+                    f"パワー・バキュームを埋め、同地域を自国に編入しました！"
+                    f"（吸収確率: {absorb_prob:.1%}）",
+                    involved_countries=[winner, new_name, old_name, "global"]
+                )
+                self._handle_peaceful_annexation(winner, new_name)
+        
+        # オークションリストをクリア
+        self.state.pending_vacuum_auctions.clear()
+

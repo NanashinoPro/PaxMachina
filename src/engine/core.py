@@ -163,6 +163,11 @@ class WorldEngine(
         for country_name, action in actions.items():
             self._process_diplomacy_and_espionage(country_name, action)
         
+        # パワー・バキューム・オークションの解決（Tullock CSF）
+        # プレターンで分裂が発生した場合、各国のvacuum_bidを集計して吸収/独立を決定
+        if self.state.pending_vacuum_auctions:
+            self._resolve_vacuum_auctions(actions)
+        
         # 多国間会談: 受諾者が2名以上集まった提案を実行キューに移動
         for s in list(self.state.pending_summits):
             if s.participants and len(s.accepted_participants) >= 2:

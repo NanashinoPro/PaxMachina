@@ -53,6 +53,7 @@ flowchart TD
     ProcessTurn --> |5-1| FAid[対外援助・オランダ病判定]
     ProcessTurn --> |5-2| Domestic[内政: 予算・税収・マクロ経済投資]
     ProcessTurn --> |5-3| Diplomacy[外交・諜報: 工作・同盟・会談提案]
+    ProcessTurn --> |5-3.5| Vacuum[パワー・バキューム・オークション解決<br/>Tullock CSF]
     ProcessTurn --> |5-4| Trade[貿易・制裁: グラビティモデルと赤字計算]
     ProcessTurn --> |5-5| War[戦争: 軍事衝突と占領判定]
     ProcessTurn --> |5-6| RandomEvent[ランダムイベント: 災害・技術革新]
@@ -60,6 +61,7 @@ flowchart TD
     FAid --> IntelReport[6. 諜報機関レポートの作成]
     Domestic --> IntelReport[6. 諜報機関レポートの作成]
     Diplomacy --> IntelReport[6. 諜報機関レポートの作成]
+    Vacuum --> IntelReport[6. 諜報機関レポートの作成]
     Trade --> IntelReport[6. 諜報機関レポートの作成]
     War --> IntelReport[6. 諜報機関レポートの作成]
     RandomEvent --> IntelReport[6. 諜報機関レポートの作成]
@@ -410,6 +412,62 @@ AIが`dissolve_parliament: true`を出力することで、任意のタイミン
 *   **新興国家に対する援助機会のAIプロンプト通知** [Alesina & Spolaore (2003, MIT Press)]:
     *   小国は国際支援と貿易開放により大国並みの成長が可能という理論に基づき、新国家（`regime_duration ≤ 2`）が存在する場合、他国の首脳AIプロンプトに「援助機会」として情報を明示する。
     *   援助の決定はシステムからの自動注入ではなく、各国のAIエージェントが既存の援助システム（`aid_amount_economy` / `aid_amount_military` + `aid_acceptance_ratio`）を用いて自主的に判断する。
+
+#### 分裂抑制メカニズム（v1.6追加）
+
+##### クールダウン期間（Polity IV regime durability coding 準拠）
+`FRAGMENTATION_COOLDOWN_TURNS = 4`
+
+新政権発足後の最初の4ターン（1年間）は、クーデターおよび分裂の判定が完全にスキップされる。これは Polity IV プロジェクトにおける regime durability（政権耐久性）のコーディング規範に準拠しており、政権の安定性評価には最低1年間の観測期間が必要であるという知見に基づく。
+
+##### 分裂しきい値ゲート（Goldstone et al. 2010）
+`FRAGMENTATION_INSTABILITY_THRESHOLD = 40.0`
+
+基礎不安定性（`base_instability = max(0, 30 - approval_rating) + min(100, rebellion_risk)`）が閾値 40.0 未満の場合、分裂判定はスキップされ通常のクーデター（政権交代）判定のみが行われる。これは Political Instability Task Force (Goldstone et al. 2010) の知見に基づき、国家崩壊は単一の不安定要因ではなく、複数の危機が同時に蓄積した場合にのみ発生するという実証に基づく。
+
+##### 貿易分裂係数の適正化
+`FRAGMENTATION_TRADE_FACTOR_MULTIPLIER = 1.0`（旧: 5.0）
+
+Alesina & Spolaore モデルにおける貿易網の分裂圧力係数を5.0から1.0に引き下げ。貿易協定3件で約-12ptの分裂確率低下効果を持つ。
+
+#### パワー・バキューム・オークション（Tullock Contest Success Function）
+
+[学術的根拠]
+*   Tullock, G. (1980). *Efficient Rent Seeking*
+*   Hirshleifer, J. (1989). *Conflict and Rent-Seeking Success Functions*
+*   Morgenthau (1948) / Waltz (1979): パワー・バキューム理論
+
+分裂により新国家が誕生した場合、**API追加呼び出しゼロ**で解決される「パワー・バキューム・オークション」が自動的に開催される。
+
+##### メカニズム
+1. **登録**: 分裂時（`_execute_fragmentation`）に新国家情報が`pending_vacuum_auctions`に自動登録される
+2. **ベット**: 首脳AIが通常の意思決定内で`vacuum_bid`（0.0〜自国軍事力）を設定。0 = 介入しない
+3. **解決**: `process_turn`内の外交処理後に`_resolve_vacuum_auctions()`で確率的に吸収/独立を決定
+
+##### Tullock CSF の確率計算
+$$P_i = \frac{b_i^{eff}}{\sum_{j} b_j^{eff} + M_{new}}$$
+
+*   $b_i^{eff}$: 国 $i$ の有効ベット額 = $\min(b_i, M_i) \times \frac{1}{1 + d_i / 5000} \times A_i$
+*   $M_{new}$: 新国家の全軍事力（独立防衛ベット）
+*   $d_i$: 国 $i$ と新国家の間のHaversine距離（km）
+*   $A_i$: 同盟関係補正（同盟国→1.5倍、交戦国→2.0倍、その他→1.0倍）
+
+##### 特徴
+*   旧母国もオークションに参加可能（チェチェン型再統一）
+*   地理的に遠い国は距離ペナルティにより不利
+*   敵国の分裂は漁夫の利（2.0倍ボーナス）
+*   ベット額が大きいほど吸収確率が上がるが、新国家の軍事力が大きいと独立確率が高くなる
+*   吸収された場合、`_handle_peaceful_annexation`で全リソースが吸収国に統合される
+
+#### 戦略ドクトリン選択（攻撃的/防御的リアリズム）
+
+大統領・外務大臣・防衛大臣の各AIプロンプトに、国際政治理論に基づく戦略ドクトリンの選択を追加。
+
+*   **攻撃的現実主義 (Mearsheimer 2001)**: 地域覇権の追求。弱小国の軍事的併合・恫喝が合理的手段。領土拡大が生存確率を高める。
+*   **防御的現実主義 (Waltz 1979)**: 安全保障の確保で十分。過度な拡大はバランシング連合を誘発。同盟と抑止で安定化。
+
+AIはイデオロギーと国際情勢に基づいてドクトリンを自律選択し、`thought_process`に明示的に記載する。
+
 
 ### 2.8. 災害・技術革新確率テーブル (Disaster & Breakthroughs)
 

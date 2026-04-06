@@ -122,6 +122,9 @@ class DiplomaticAction(BaseModel):
     # 対外援助の受入制御（前ターンに相手国から申請された援助に対して受入率を設定）
     aid_acceptance_ratio: float = Field(1.0, ge=0.0, le=1.0, description="対象国からの援助申請に対する受入率（0.0〜1.0の連続値。実際の申請額を確認した上で戦略的に判断する。例: 0.0=全拒否、0.3=3割のみ受入、1.0=全額受入。デフォルト1.0=全額受入）")
     
+    # パワー・バキューム・オークション (Tullock CSF)
+    vacuum_bid: float = Field(0.0, ge=0.0, description="パワー・バキューム・オークションへのベット額（0.0〜自国軍事力）。分裂した新国家に対して軍事介入し吸収を試みる場合に設定。0=介入しない")
+    
     reason: str = Field(..., max_length=50, description="この外交決定の簡潔な理由（30文字以内厳守）")
 
 class AgentAction(BaseModel):
@@ -217,6 +220,7 @@ class WorldState(BaseModel):
     pending_aid_proposals: List[PendingAidProposal] = Field(default_factory=list, description="前ターンに申請された対外援助のリスト（翌ターンに受取国が受入判断する）")
     active_breakthroughs: List[BreakthroughState] = Field(default_factory=list, description="現在進行中の技術革新")
     disaster_history: List[DisasterEvent] = Field(default_factory=list, description="過去に発生した重大災害の履歴")
+    pending_vacuum_auctions: List[dict] = Field(default_factory=list, description="分裂により誕生した新国家に対するパワー・バキューム・オークションの保留中リスト")
     
     # ログ・UI用データ
     news_events: List[str] = Field(default_factory=list, description="前ターンに世界で起きた公開イベント（ニュース）")

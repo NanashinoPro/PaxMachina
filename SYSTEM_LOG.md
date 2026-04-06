@@ -1,5 +1,63 @@
 # System Log
 
+## 2026-04-06 10:00:00 - 国家分裂抑制・併合促進メカニズムの実装（v1.6）
+- **修正内容**: 国家の過度な分裂を抑制し、領土拡大・併合を促進するための包括的パッチを適用。5つの施策を統合的に実装。
+- **学術的根拠**:
+    - Tullock, G. (1980). *Efficient Rent Seeking*: コンテスト成功関数（CSF）
+    - Hirshleifer, J. (1989). *Conflict and Rent-Seeking Success Functions*: 武力均衡モデル
+    - Mearsheimer, J. (2001). *The Tragedy of Great Power Politics*: 攻撃的現実主義
+    - Waltz, K. (1979). *Theory of International Politics*: 防御的現実主義
+    - Goldstone, J. et al. (2010). *Political Instability Task Force*: 複合危機閾値
+    - Polity IV Project: 政権安定性コーディング (regime durability)
+    - Alesina & Spolaore (2003): 最適国家サイズ理論
+
+### 施策1: クールダウン期間の新設
+- `events.py`: `regime_duration <= 4`（1年）の国はクーデター・分裂判定を全スキップ
+- [Polity IV regime durability coding 準拠]
+
+### 施策2: 貿易分裂係数の引下げ
+- `constants.py`: `FRAGMENTATION_TRADE_FACTOR_MULTIPLIER` を `5.0` → `1.0` に変更
+- 効果: 貿易協定3件で約-12pt、5件で約-20ptの分裂確率低下
+
+### 施策3: 分裂しきい値ゲートの新設
+- `constants.py`: `FRAGMENTATION_INSTABILITY_THRESHOLD = 40.0` を新設
+- `events.py`: `base_instability < 40` の場合、分裂判定をスキップ（通常のクーデターのみ）
+- [Goldstone et al. (2010) Political Instability Task Force: 複合危機時のみ分裂]
+
+### 施策4: パワー・バキューム・オークション（Tullock CSF方式）
+- `models.py`: `WorldState.pending_vacuum_auctions` リスト追加、`DiplomaticAction.vacuum_bid` フィールド追加
+- `events.py`: 分裂発生時にオークションを自動登録（新国家の軍事力 = 独立防衛ベット）
+- `diplomacy.py`: `_resolve_vacuum_auctions()` メソッド新設。各国のvacuum_bidを集計し、地理的距離ペナルティ・同盟関係ボーナスを適用後、Tullock CSFで確率計算
+- `core.py`: `process_turn` 内の外交処理後にオークション解決を呼び出し
+- `base.py`: プロンプトにオークション情報（分裂国の軍事力・経済力・人口）を表示
+- `president.py`: JSONスキーマに `vacuum_bid` フィールド追加
+- **API追加呼び出し: ゼロ**（首脳AIの通常の意思決定内でベット額を判断）
+- 特徴: 旧母国もオークションに参加可能（チェチェン型再統一）
+
+### 施策5: 戦略ドクトリン選択プロンプト
+- `president.py`, `foreign.py`, `defense.py`: 攻撃的現実主義(Mearsheimer) vs 防御的現実主義(Waltz)の選択をプロンプトに追加
+- AIがイデオロギーに基づいてドクトリンを自律選択し、thought_processに記載
+
+### 修正ファイル一覧
+| ファイル | 修正内容 |
+|---|---|
+| `models.py` | `pending_vacuum_auctions`, `vacuum_bid` 追加 |
+| `constants.py` | 貿易係数引下げ、しきい値・クールダウン定数追加 |
+| `events.py` | クールダウン判定、しきい値ゲート、オークション登録 |
+| `diplomacy.py` | `_resolve_vacuum_auctions()` 新設 |
+| `core.py` | オークション解決の呼び出し |
+| `base.py` | プロンプトにオークション情報表示 |
+| `president.py` | 戦略ドクトリン + vacuum_bid スキーマ |
+| `foreign.py` | 戦略ドクトリン追加 |
+| `defense.py` | 戦略ドクトリン追加 |
+
+> **【AIからの報告】**
+> ボス、分裂抑制・併合促進の包括的パッチを実装しました。
+> 5つの施策の要約：① クールダウン4ターン ② 貿易係数1/5 ③ 不安定性閾値40 ④ Tullock CSFオークション（API追加ゼロ） ⑤ 攻防リアリズムドクトリン
+> 分裂が発生しても、大国のAIが自律的に軍事介入を判断し、弱小国は高確率で吸収されます。
+> 旧母国もオークションに参加できるため、チェチェン型の再統一も自然に発生します。
+
+
 ## 2026-03-31 16:45:00 - 多国間首脳会談・議会解散権の実装
 - **修正内容**: 2つの主要機能 — 多国間首脳会談と議会解散権 — をシミュレーションエンジンに追加。
 - **多国間首脳会談**:
