@@ -593,7 +593,8 @@ def main():
                 agent_system.token_usage["サマリー生成"] = {
                     "model": "gemini-2.5-flash",
                     "prompt_tokens": summary_info["usage"]["prompt_tokens"],
-                    "candidates_token_count": summary_info["usage"]["candidates_token_count"]
+                    "candidates_token_count": summary_info["usage"]["candidates_token_count"],
+                    "thoughts_token_count": summary_info["usage"].get("thoughts_token_count", 0)
                 }
     except Exception as e:
         print(f"Failed to auto-generate summary: {e}")
@@ -608,23 +609,28 @@ def main():
         model = usage["model"]
         p_tokens = usage["prompt_tokens"]
         c_tokens = usage["candidates_token_count"]
+        t_tokens = usage.get("thoughts_token_count", 0)
         
         # 単価 (100万トークンあたり)
+        # 思考トークン単価 (Gemini 2.5系: Promptと同額)
         if "gemini-3.1-pro" in model.lower():
-            p_price, c_price = 2.00, 12.00
+            p_price, c_price, t_price = 2.00, 12.00, 2.00
         elif "gemini-2.5-pro" in model.lower():
-            p_price, c_price = 1.25, 10.00
+            p_price, c_price, t_price = 1.25, 10.00, 1.25
         elif "gemini-2.5-flash-lite" in model.lower():
-            p_price, c_price = 0.10, 0.40
+            p_price, c_price, t_price = 0.10, 0.40, 0.10
         elif "gemini-2.5-flash" in model.lower():
-            p_price, c_price = 0.30, 2.50
+            p_price, c_price, t_price = 0.30, 2.50, 0.30
         else: # 分からないモデルのフォールバック (flash扱い)
-            p_price, c_price = 0.30, 2.50
+            p_price, c_price, t_price = 0.30, 2.50, 0.30
             
-        cat_cost = (p_tokens / 1_000_000 * p_price) + (c_tokens / 1_000_000 * c_price)
+        cat_cost = (p_tokens / 1_000_000 * p_price) + (c_tokens / 1_000_000 * c_price) + (t_tokens / 1_000_000 * t_price)
         total_cost += cat_cost
         
-        report_line = f"- [{category}] {model}: Prompt {p_tokens} ({p_price}$/M), Output {c_tokens} ({c_price}$/M) -> ${cat_cost:.4f}"
+        if t_tokens > 0:
+            report_line = f"- [{category}] {model}: Prompt {p_tokens} ({p_price}$/M), Output {c_tokens} ({c_price}$/M), Thinking {t_tokens} ({t_price}$/M) -> ${cat_cost:.4f}"
+        else:
+            report_line = f"- [{category}] {model}: Prompt {p_tokens} ({p_price}$/M), Output {c_tokens} ({c_price}$/M) -> ${cat_cost:.4f}"
         print(report_line)
         cost_log_lines.append(report_line)
         

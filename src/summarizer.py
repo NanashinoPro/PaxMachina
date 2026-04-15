@@ -123,7 +123,8 @@ def generate_summary(log_filepath: str, force: bool = False) -> dict:
             "summary": summary_data.get("summary", ""),
             "usage": {
                 "prompt_tokens": usage.prompt_token_count if usage else 0,
-                "candidates_token_count": usage.candidates_token_count if usage else 0
+                "candidates_token_count": usage.candidates_token_count if usage else 0,
+                "thoughts_token_count": getattr(usage, 'thoughts_token_count', 0) or 0
             }
         }
         

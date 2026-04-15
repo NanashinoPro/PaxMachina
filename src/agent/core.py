@@ -60,7 +60,7 @@ class AgentSystem:
             if self.logger:
                 self.logger.sys_log("[System] サブAPIキー未設定 → フォールバック無効")
         
-        self.sentiment_analyzer = GeminiSentimentAnalyzer(self.client, client_sub=self.client_sub)
+        self.sentiment_analyzer = GeminiSentimentAnalyzer(self.client, client_sub=self.client_sub, token_usage=self.token_usage)
         
         # Ollamaクライアントの初期化
         try:
@@ -93,9 +93,10 @@ class AgentSystem:
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             meta = response.usage_metadata
             if category not in self.token_usage:
-                self.token_usage[category] = {"prompt_tokens": 0, "candidates_token_count": 0, "model": model}
+                self.token_usage[category] = {"prompt_tokens": 0, "candidates_token_count": 0, "thoughts_token_count": 0, "model": model}
             self.token_usage[category]["prompt_tokens"] += getattr(meta, 'prompt_token_count', 0)
             self.token_usage[category]["candidates_token_count"] += getattr(meta, 'candidates_token_count', 0)
+            self.token_usage[category]["thoughts_token_count"] += getattr(meta, 'thoughts_token_count', 0) or 0
             
         return response
 

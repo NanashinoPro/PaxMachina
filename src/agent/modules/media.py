@@ -10,9 +10,21 @@ class GeminiSentimentAnalyzer:
     """Gemini API (gemini-2.5-flash-lite) を用いた感情分析器"""
     SENTIMENT_MODEL = "gemini-2.5-flash-lite"
     
-    def __init__(self, client, client_sub=None):
+    def __init__(self, client, client_sub=None, token_usage: dict = None):
         self.client = client
         self.client_sub = client_sub
+        self.token_usage = token_usage  # AgentSystem.token_usage への参照（コスト追跡用）
+    
+    def _track_usage(self, response):
+        """usage_metadataをtoken_usageに記録する"""
+        if self.token_usage is not None and hasattr(response, 'usage_metadata') and response.usage_metadata:
+            meta = response.usage_metadata
+            category = "sentiment_analysis"
+            if category not in self.token_usage:
+                self.token_usage[category] = {"prompt_tokens": 0, "candidates_token_count": 0, "thoughts_token_count": 0, "model": self.SENTIMENT_MODEL}
+            self.token_usage[category]["prompt_tokens"] += getattr(meta, 'prompt_token_count', 0)
+            self.token_usage[category]["candidates_token_count"] += getattr(meta, 'candidates_token_count', 0)
+            self.token_usage[category]["thoughts_token_count"] += getattr(meta, 'thoughts_token_count', 0) or 0
     
     def _call_api(self, client, prompt: str) -> list:
         """指定されたクライアントで感情分析APIを呼び出す"""
@@ -20,6 +32,7 @@ class GeminiSentimentAnalyzer:
             model=self.SENTIMENT_MODEL,
             contents=prompt
         )
+        self._track_usage(response)
         raw = response.text.strip()
         scores = []
         for part in raw.replace(" ", "").split(","):
