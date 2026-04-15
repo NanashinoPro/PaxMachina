@@ -1,5 +1,33 @@
 # System Log
 
+## 2026-04-15 17:10:00 - 消滅国ゴーストバグ修正 — 共通クリーンアップ関数の新設（v1.12）
+- **修正内容**: 台湾が中国に併合された後も、日本・アメリカのAIエージェントが台湾宛ての外交政策を出力し続ける「消滅国ゴーストバグ」を修正。共通クリーンアップ関数`_cleanup_eliminated_country()`を新設し、`_handle_defeat`と`_handle_peaceful_annexation`の両方から呼び出すDRY設計に統一。
+- **根本原因（2層構造）**:
+    1. **エンジン層**: `_handle_defeat`/`_handle_peaceful_annexation`で国家消滅時、`pending_aid_proposals`, `pending_ceasefires`, `pending_surrenders`, `relations`, `defender_supporters`, `dependency_ratio`の6項目がクリーンアップされていなかった
+    2. **プロンプト層**: AIに「この国はもう存在しない」と明示的に伝えていないため、過去ニュースから名前を拾って消滅国宛の外交を自発生成していた
+- **修正詳細**:
+    - `engine/core.py`: `_cleanup_eliminated_country(eliminated_name)` メソッドを新設。12項目の関連データを一括削除する共通関数。消滅国名を`defeated_countries`リストに追加
+    - `engine/military.py`: `_handle_defeat`の個別クリーンアップを共通関数呼び出しに置換
+    - `engine/diplomacy.py`: `_handle_peaceful_annexation`の個別クリーンアップを共通関数呼び出しに置換
+    - `models.py`: `WorldState`に`defeated_countries: List[str]`フィールドを追加
+    - `agent/prompts/base.py`: `build_common_context`に消滅国リスト表示セクションを追加。`defeated_countries`から動的生成し、`target_country`に指定しないよう明示的に禁止
+
+### 修正ファイル一覧
+| ファイル | 修正内容 |
+|---|---|
+| `src/models.py` | `WorldState`に`defeated_countries`フィールド追加 |
+| `src/engine/core.py` | `_cleanup_eliminated_country()`共通メソッド新設（12項目一括クリーンアップ） |
+| `src/engine/military.py` | `_handle_defeat`の個別クリーンアップを共通関数呼び出しに統一 |
+| `src/engine/diplomacy.py` | `_handle_peaceful_annexation`の個別クリーンアップを共通関数呼び出しに統一 |
+| `src/agent/prompts/base.py` | 消滅国リスト表示と外交アクション禁止指示をプロンプトに注入 |
+| `docs/ARCHITECTURE.md` | §2.11「国家崩壊とデータのクリーンアップ」を全面改訂。共通クリーンアップ関数の12項目を明記 |
+
+> **【AIからの報告】**
+> ボス、消滅国ゴーストバグを修正しました。
+> 根本原因は2層構造でした：① エンジン側で6項目のクリーンアップが欠落、② AIプロンプトに消滅国への抑止指示がなかった。
+> 共通関数`_cleanup_eliminated_country()`で12項目を一括削除するDRY設計に統一し、プロンプトには`defeated_countries`リストから動的に「この国は消滅したので外交対象外です」と注入する仕組みを実装しました。
+> これで次回のシミュレーションから、台湾併合後に日本やアメリカが台湾宛の外交を生成する問題が解消されるはずです。
+
 ## 2026-04-15 16:00:00 - 共同防衛メカニズム（Collective Defense）実装（v1.11）
 - **修正内容**: 同盟国が防衛側となっている既存の戦争に「防衛支援国」として参加する `join_ally_defense` メカニズムを実装。
 - **設計思想**: `declare_war`（直接宣戦布告→二国間戦争）ではなく、既存のWarStateに支援国として合流する方式。現実の日米安保（在日米軍が日本の防衛に参加）を再現。
