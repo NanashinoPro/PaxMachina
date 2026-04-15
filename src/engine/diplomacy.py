@@ -587,13 +587,8 @@ class DiplomacyMixin:
         # 吸収された国を世界から削除
         del self.state.countries[absorbed_name]
         
-        # 関連するデータのクリーンアップ
-        self.state.active_wars = [w for w in self.state.active_wars if w.aggressor != absorbed_name and w.defender != absorbed_name]
-        self.state.active_trades = [t for t in self.state.active_trades if t.country_a != absorbed_name and t.country_b != absorbed_name]
-        self.state.active_sanctions = [s for s in self.state.active_sanctions if s.imposer != absorbed_name and s.target != absorbed_name]
-        self.state.pending_summits = [s for s in self.state.pending_summits if s.proposer != absorbed_name and s.target != absorbed_name]
-        self.state.pending_alliances = [a for a in self.state.pending_alliances if a.proposer != absorbed_name and a.target != absorbed_name]
-        self.state.pending_annexations = [a for a in self.state.pending_annexations if a.proposer != absorbed_name and a.target != absorbed_name]
+        # 共通クリーンアップ関数で関連データを一括削除
+        self._cleanup_eliminated_country(absorbed_name)
 
     def _resolve_vacuum_auctions(self, actions):
         """パワー・バキューム・オークションの解決（Tullock Contest Success Function）

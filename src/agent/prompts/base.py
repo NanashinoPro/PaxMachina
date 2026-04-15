@@ -265,4 +265,14 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
                 influence_info += f"  ⚡ {auction['target_country']}（政変発生）\n"
                 influence_info += f"     経済力: {target_c.economy:.1f}, 軍事力: {target_c.military:.1f}, 支持率: {target_c.approval_rating:.1f}%\n\n"
         
-    return my_info + other_info + news_info + vacuum_info + influence_info
+    # 消滅国リストの表示（AIが消滅国への外交アクションを生成するのを防止）
+    eliminated_info = ""
+    if hasattr(world_state, 'defeated_countries') and world_state.defeated_countries:
+        eliminated_info = "\n---⚠️【消滅した国家（外交アクション対象外）】⚠️---\n"
+        eliminated_info += "以下の国家は既に消滅（併合・降伏等）しており、世界に存在しません。\n"
+        eliminated_info += "**これらの国に対する diplomatic_policies は無効です。target_country に絶対に指定しないでください。**\n"
+        for name in world_state.defeated_countries:
+            eliminated_info += f"  ❌ {name}\n"
+        eliminated_info += "\n"
+        
+    return my_info + other_info + news_info + vacuum_info + influence_info + eliminated_info

@@ -48,6 +48,68 @@ class WorldEngine(
             # [追加] 政権の存続期間をインクリメント
             country.regime_duration += 1
 
+    def _cleanup_eliminated_country(self, eliminated_name: str):
+        """消滅した国家に関連する全データを一括クリーンアップする（DRY共通関数）
+        
+        _handle_defeat（軍事的併合）と_handle_peaceful_annexation（平和的統合）の
+        両方から呼び出される。消滅国への外交アクションが残留する「ゴーストバグ」を防止する。
+        """
+        # 1. 戦争データのクリーンアップ
+        self.state.active_wars = [w for w in self.state.active_wars if w.aggressor != eliminated_name and w.defender != eliminated_name]
+        
+        # 2. 貿易協定の破棄
+        self.state.active_trades = [t for t in self.state.active_trades if t.country_a != eliminated_name and t.country_b != eliminated_name]
+        
+        # 3. 経済制裁の解除
+        self.state.active_sanctions = [s for s in self.state.active_sanctions if s.imposer != eliminated_name and s.target != eliminated_name]
+        
+        # 4. 保留中の提案（会談・同盟・統合）の削除
+        self.state.pending_summits = [s for s in self.state.pending_summits if s.proposer != eliminated_name and s.target != eliminated_name]
+        self.state.pending_alliances = [a for a in self.state.pending_alliances if a.proposer != eliminated_name and a.target != eliminated_name]
+        self.state.pending_annexations = [a for a in self.state.pending_annexations if a.proposer != eliminated_name and a.target != eliminated_name]
+        
+        # 5. 保留中の援助申請の削除（従来欠落していた）
+        self.state.pending_aid_proposals = [p for p in self.state.pending_aid_proposals if p.donor != eliminated_name and p.target != eliminated_name]
+        
+        # 6. 保留中の停戦提案の削除（従来欠落していた）
+        self.state.pending_ceasefires = [c for c in self.state.pending_ceasefires if c.proposer != eliminated_name and c.target != eliminated_name]
+        
+        # 7. 保留中の降伏勧告の削除（従来欠落していた）
+        self.state.pending_surrenders = [s for s in self.state.pending_surrenders if s.aggressor != eliminated_name and s.defender != eliminated_name]
+        
+        # 8. relations辞書から消滅国のエントリを完全削除（従来欠落していた）
+        if eliminated_name in self.state.relations:
+            del self.state.relations[eliminated_name]
+        for country_name in list(self.state.relations.keys()):
+            if eliminated_name in self.state.relations[country_name]:
+                del self.state.relations[country_name][eliminated_name]
+        
+        # 9. 他国のdefender_supportersから消滅国を削除（従来欠落していた）
+        for war in self.state.active_wars:
+            if eliminated_name in war.defender_supporters:
+                del war.defender_supporters[eliminated_name]
+        
+        # 10. 他国のdependency_ratioから消滅国を削除（従来欠落していた）
+        for country in self.state.countries.values():
+            if eliminated_name in country.dependency_ratio:
+                del country.dependency_ratio[eliminated_name]
+            # 宗主国が消滅した場合は独立回復
+            if country.suzerain == eliminated_name:
+                country.suzerain = None
+        
+        # 11. 多国間首脳会談のparticipantsリストから消滅国を除去
+        for s in self.state.pending_summits:
+            if eliminated_name in s.participants:
+                s.participants = [p for p in s.participants if p != eliminated_name]
+            if eliminated_name in s.accepted_participants:
+                s.accepted_participants = [p for p in s.accepted_participants if p != eliminated_name]
+        
+        # 12. 消滅国リストに追加（AIプロンプトで外交対象外であることを明示するため）
+        if eliminated_name not in self.state.defeated_countries:
+            self.state.defeated_countries.append(eliminated_name)
+        
+        self.sys_logs_this_turn.append(f"[クリーンアップ完了] {eliminated_name}に関連する全データを削除しました。")
+
     def log_event(self, message: str, is_private: bool = False, involved_countries: List[str] = None):
         """
         イベントログを追加し、データベースが有効ならQdrantにも記録する。
