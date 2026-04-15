@@ -1,5 +1,56 @@
 # System Log
 
+## 2026-04-15 11:42:00 - 停戦・講和・降伏勧告メカニズムの実装
+- **修正内容**: 戦争終結手段として「停戦提案」「講和会談」「降伏勧告」の3メカニズムを追加。大統領エージェントが各大臣の意見を統合し、最終的に停戦/降伏の判断を行う設計。
+- **メカニズム概要**:
+    - **停戦提案**: 同盟と同じ双方向パターン。片方が`propose_ceasefire=true`→翌ターン相手が`accept_ceasefire=true`で成立、または同一ターンに双方が提案した場合も即時成立。
+    - **降伏勧告**: 攻撃側が`demand_surrender=true`→防衛側が`accept_surrender=true`で無条件降伏成立。
+    - **講和会談**: 停戦/降伏成立後に自動実行。占領率に基づく以下の処理を行う：
+        - 占領率3%未満: 防衛成功。領土・人口の喪失なし。防衛側が賠償金を請求。
+        - 占領率3%以上: 攻撃側が占領率分の領土・人口を獲得。攻撃側が賠償金を請求。
+        - 賠償金 = (請求側の累積軍事損害 + 累積民間人GDP損害) × 1.2（懲罰係数）
+        - 無条件降伏: 占領率に関わらず攻撃側が全賠償金を請求。
+        - 関係値リセット（at_war → neutral）
+- **実装詳細**:
+    - `src/models.py`:
+        - `WarState`に累積損害追跡フィールド4つ追加（`aggressor_cumulative_military_loss`, `aggressor_cumulative_civilian_gdp_loss`, `defender_cumulative_military_loss`, `defender_cumulative_civilian_gdp_loss`）
+        - `DiplomaticAction`に停戦/降伏フィールド4つ追加（`propose_ceasefire`, `accept_ceasefire`, `demand_surrender`, `accept_surrender`）
+        - `CeasefireProposal`/`SurrenderDemand`モデル新規作成
+        - `WorldState`に`pending_ceasefires`/`pending_surrenders`リスト追加
+    - `src/engine/military.py`: `_process_wars`内に累積損害の記録ロジック追加（各ターンの軍事ダメージと民間人GDP損害をWarStateに加算）
+    - `src/engine/diplomacy.py`:
+        - 停戦提案・受諾の処理ロジック追加（同盟と同じ双方向パターン）
+        - 降伏勧告・受諾の処理ロジック追加
+        - `_find_war`/`_find_war_as_aggressor`ヘルパーメソッド追加
+        - `_execute_peace_conference`メソッド新規作成（領土・人口移転、賠償金計算、関係リセット）
+    - `src/agent/prompts/president.py`: JSONスキーマに4フィールド追加、判断ルール（占領率3%閾値、停戦/降伏の判断基準）を追記
+    - `src/agent/prompts/foreign.py`: 停戦提案指針をthought_process用に追加
+    - `src/agent/prompts/defense.py`: 戦争終結判断指針をthought_process用に追加
+- **テスト結果**: 2カ国テスト（2ターン）で以下を確認：
+    - A国（防衛側）がターン2で`propose_ceasefire: true`を出力 — 停戦提案メカニズムが正常動作
+    - 大統領JSONに4フィールド（`propose_ceasefire`/`accept_ceasefire`/`demand_surrender`/`accept_surrender`）が含まれることを確認
+    - 防衛大臣が「占領率3%未満での講和を目指し、領土維持と賠償金請求を目標」と秘匿計画に記載 — AI判断指針が機能
+    - B国は停戦を拒否し投入比率を90%に引き上げ — 攻撃側の戦略的判断も正常
+    - 累積損害記録、ログ出力、エラーなし完走（Exit code: 0）
+- **APIコスト**: テスト2ターン（2カ国）合計 $0.0901
+
+### 修正ファイル一覧
+| ファイル | 修正内容 |
+|---|---|
+| `models.py` | WarState累積損害4フィールド、DiplomaticAction停戦4フィールド、CeasefireProposal/SurrenderDemandモデル、WorldState保留リスト |
+| `engine/military.py` | 累積損害の記録ロジック |
+| `engine/diplomacy.py` | 停戦/降伏/講和処理、_find_war、_execute_peace_conference |
+| `agent/prompts/president.py` | JSONスキーマ+判断ルール+占領率閾値 |
+| `agent/prompts/foreign.py` | 停戦提案指針（thought_process用） |
+| `agent/prompts/defense.py` | 戦争終結判断指針（thought_process用） |
+
+> **【AIからの報告】**
+> ボス、停戦・講和・降伏勧告メカニズムを実装しました。
+> 大統領エージェントが各大臣の意見（外務：停戦タイミング、防衛：軍事的優劣）を統合して最終判断する設計です。
+> テストではA国のAIが「占領率3%未満での講和を目指す」という戦略を自律的に策定し、占領率4.4%に達した段階でB国に停戦を提案しました。
+> B国は停戦を拒否し軍事的圧力を強化、という自然な展開が確認できました。
+
+
 ## 2026-04-06 10:33:00 - 企画スコアリングへの「実装コスト」軸追加（/plan-content ワークフロー強化）
 - **修正内容**: `31YouTubeAnalytics/plan_proposals.py` のスコアリングエンジンに5番目の評価軸「`implementationCost`」を新設。`00ai_diplomacy` システムの既存機能マッピングに基づき、各企画テーマが追加開発なしで動画制作に着手できるかを自動判定する機能を追加。
 - **変更の背景**: 企画立案時にトレンド性やチャンネル適合度だけでなく、シミュレーションシステムの実装コスト（追加開発の必要性）を考慮することで、より現実的な企画優先度を算出するため。

@@ -116,6 +116,12 @@ class DiplomaticAction(BaseModel):
     # 軍事侵攻比率の変更
     war_commitment_ratio: Optional[float] = Field(None, ge=0.1, le=1.0, description="交戦中の場合、この戦争に投入する軍事力の比率を変更する（0.1〜1.0。未指定なら現状維持）")
     
+    # 停戦・講和・降伏勧告
+    propose_ceasefire: bool = Field(False, description="交戦中の相手国に停戦を提案するか（双方合意で講和会談に移行）")
+    accept_ceasefire: bool = Field(False, description="前ターンに相手国から提案された停戦を受諾するか（受諾すると講和会談フェーズに移行）")
+    demand_surrender: bool = Field(False, description="交戦中の相手国に降伏勧告を発するか（攻撃側のみ使用可能）")
+    accept_surrender: bool = Field(False, description="前ターンに攻撃側から発された降伏勧告を受諾するか（受諾すると占領率が即100%となり国家消滅）")
+    
     # 対外援助 (Foreign Aid)
     aid_amount_economy: float = Field(0.0, ge=0.0, description="対象国に対する民生・インフラへの経済支援額（自国の政府予算から拠出。翌ターンに相手国が受入判断する）")
     aid_amount_military: float = Field(0.0, ge=0.0, description="対象国に対する兵器・軍事物資の軍事支援額（自国の政府予算から拠出。翌ターンに相手国が受入判断する）")
@@ -147,6 +153,10 @@ class WarState(BaseModel):
     aggressor_commitment_ratio: float = Field(0.50, ge=0.0, le=1.0, description="攻撃側の軍事力投入比率（0.0-1.0）。自国軍のうちどれだけを前線に投入するか")
     defender_commitment_ratio: float = Field(0.80, ge=0.0, le=1.0, description="防衛側の軍事力投入比率（0.0-1.0）。自衛のため通常は高め")
     war_turns_elapsed: int = Field(0, ge=0, description="戦争経過ターン数。Rally効果と戦争疲弊の計算に使用")
+    aggressor_cumulative_military_loss: float = Field(0.0, description="攻撃側の累積軍事損害額（講和時の賠償金計算用）")
+    defender_cumulative_military_loss: float = Field(0.0, description="防衛側の累積軍事損害額（講和時の賠償金計算用）")
+    aggressor_cumulative_civilian_gdp_loss: float = Field(0.0, description="攻撃側の累積民間人GDP損害額（人口損失×一人当たりGDP）")
+    defender_cumulative_civilian_gdp_loss: float = Field(0.0, description="防衛側の累積民間人GDP損害額（人口損失×一人当たりGDP）")
 
 class TradeState(BaseModel):
     """貿易協定を結んでいるペア"""
@@ -178,6 +188,16 @@ class AnnexationProposal(BaseModel):
     """平和的統合の保留中の提案"""
     proposer: str = Field(..., description="統合（吸収）を提案した国")
     target: str = Field(..., description="提案された（吸収される）国")
+
+class CeasefireProposal(BaseModel):
+    """停戦提案の保留中リクエスト（翌ターンに相手が受諾すれば講和会談へ移行）"""
+    proposer: str = Field(..., description="停戦を提案した国")
+    target: str = Field(..., description="提案された国")
+
+class SurrenderDemand(BaseModel):
+    """降伏勧告の保留中リクエスト（攻撃側のみ発行可能）"""
+    aggressor: str = Field(..., description="降伏を勧告した攻撃側の国")
+    defender: str = Field(..., description="勧告された防衛側の国")
 
 class PendingAidProposal(BaseModel):
     """保留中の対外援助の申請（翌ターンに受取国が受入判断する）"""
@@ -217,6 +237,8 @@ class WorldState(BaseModel):
     pending_summits: List[SummitProposal] = Field(default_factory=list, description="前ターンに提案された首脳会談のリスト")
     pending_alliances: List[AllianceProposal] = Field(default_factory=list, description="前ターンに提案された同盟のリスト（相互合意メカニズム）")
     pending_annexations: List[AnnexationProposal] = Field(default_factory=list, description="前ターンに提案された平和的統合のリスト")
+    pending_ceasefires: List[CeasefireProposal] = Field(default_factory=list, description="前ターンに提案された停戦のリスト")
+    pending_surrenders: List[SurrenderDemand] = Field(default_factory=list, description="前ターンに発された降伏勧告のリスト")
     pending_aid_proposals: List[PendingAidProposal] = Field(default_factory=list, description="前ターンに申請された対外援助のリスト（翌ターンに受取国が受入判断する）")
     active_breakthroughs: List[BreakthroughState] = Field(default_factory=list, description="現在進行中の技術革新")
     disaster_history: List[DisasterEvent] = Field(default_factory=list, description="過去に発生した重大災害の履歴")

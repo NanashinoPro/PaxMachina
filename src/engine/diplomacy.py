@@ -4,7 +4,7 @@ from typing import Dict, List, Any
 from models import (
     AgentAction, GovernmentType, RelationType, WarState, TradeState,
     SanctionState, SummitProposal, AllianceProposal, AnnexationProposal, CountryState,
-    PendingAidProposal
+    PendingAidProposal, CeasefireProposal, SurrenderDemand
 )
 
 class DiplomacyMixin:
@@ -232,6 +232,62 @@ class DiplomacyMixin:
                         self.log_event(f"📊 {country_name}が対{target_name}戦への軍事投入比率を{old_ratio:.0%}から{new_ratio:.0%}に変更しました。", involved_countries=[country_name, target_name, "global"])
                         break
                     
+            # 停戦提案（同盟提案と同じ双方向メカニズム）
+            if getattr(dip, 'propose_ceasefire', False):
+                # 交戦中か確認
+                war = self._find_war(country_name, target_name)
+                if war:
+                    # 相手から同一ターンまたは前ターンに既に提案が来ているか確認
+                    matched = [c for c in self.state.pending_ceasefires if c.proposer == target_name and c.target == country_name]
+                    if matched:
+                        # 双方合意 → 講和会談を実行
+                        self.log_event(f"🕊️ {country_name}と{target_name}が停戦に合意しました。講和会談が開催されます。", involved_countries=[country_name, target_name, "global"])
+                        self._execute_peace_conference(war)
+                        self.state.pending_ceasefires.remove(matched[0])
+                    else:
+                        # 提案をキューに積む（翌ターン以降に相手が受諾すれば成立）
+                        existing = [c for c in self.state.pending_ceasefires if c.proposer == country_name and c.target == target_name]
+                        if not existing:
+                            self.state.pending_ceasefires.append(CeasefireProposal(proposer=country_name, target=target_name))
+                            self.log_event(f"🏳️ {country_name}が{target_name}に対して停戦を提案しました。（相手の合意を待機中）", involved_countries=[country_name, target_name, "global"])
+                else:
+                    self.sys_logs_this_turn.append(f"[{country_name}] 停戦提案: {target_name}と交戦中ではないためスキップ")
+            
+            # 停戦受諾
+            if getattr(dip, 'accept_ceasefire', False):
+                matched = [c for c in self.state.pending_ceasefires if c.proposer == target_name and c.target == country_name]
+                if matched:
+                    war = self._find_war(country_name, target_name)
+                    if war:
+                        self.log_event(f"🕊️ {country_name}が{target_name}からの停戦提案を受諾しました。講和会談が開催されます。", involved_countries=[country_name, target_name, "global"])
+                        self._execute_peace_conference(war)
+                        self.state.pending_ceasefires.remove(matched[0])
+            
+            # 降伏勧告（攻撃側のみ）
+            if getattr(dip, 'demand_surrender', False):
+                war = self._find_war_as_aggressor(country_name, target_name)
+                if war:
+                    existing = [s for s in self.state.pending_surrenders if s.aggressor == country_name and s.defender == target_name]
+                    if not existing:
+                        self.state.pending_surrenders.append(SurrenderDemand(aggressor=country_name, defender=target_name))
+                        self.log_event(f"⚠️ 【降伏勧告】{country_name}が{target_name}に対して無条件降伏を要求しました！", involved_countries=[country_name, target_name, "global"])
+                        # 防衛側のprivate_messagesに通知
+                        if target_name in self.state.countries:
+                            self.state.countries[target_name].private_messages.append(f"【{country_name}からの降伏勧告】\n我が国は貴国に対し、即時の無条件降伏を要求する。受諾すれば国家は消滅する。")
+                else:
+                    self.sys_logs_this_turn.append(f"[{country_name}] 降伏勧告: {target_name}への攻撃側ではないためスキップ")
+            
+            # 降伏受諾
+            if getattr(dip, 'accept_surrender', False):
+                matched = [s for s in self.state.pending_surrenders if s.aggressor == target_name and s.defender == country_name]
+                if matched:
+                    war = self._find_war(country_name, target_name)
+                    if war:
+                        # 占領率を即時100%に設定 → _process_warsで_handle_defeatが自動適用
+                        war.target_occupation_progress = 100.0
+                        self.log_event(f"💀 【降伏受諾】{country_name}が{target_name}の降伏勧告を受諾しました。占領率が即座に100%に設定されます。", involved_countries=[country_name, target_name, "global"])
+                    self.state.pending_surrenders.remove(matched[0])
+
             # 諜報工作
             if dip.espionage_gather_intel or dip.espionage_sabotage:
                 self._process_espionage(country_name, target_name, dip)
@@ -740,3 +796,131 @@ class DiplomacyMixin:
         # オークションリストをクリア
         self.state.pending_influence_auctions.clear()
 
+    def _find_war(self, country_a: str, country_b: str):
+        """2国間の戦争を検索（攻撃/防衛の順序は問わない）"""
+        for w in self.state.active_wars:
+            if (w.aggressor == country_a and w.defender == country_b) or \
+               (w.aggressor == country_b and w.defender == country_a):
+                return w
+        return None
+
+    def _find_war_as_aggressor(self, aggressor: str, defender: str):
+        """指定国が攻撃側である戦争を検索"""
+        for w in self.state.active_wars:
+            if w.aggressor == aggressor and w.defender == defender:
+                return w
+        return None
+
+    def _execute_peace_conference(self, war: WarState):
+        """
+        講和会談フェーズ:
+        1. 国境線の引き直し + 人口移転（占領率に基づく）
+        2. 賠償金の精算
+        3. 関係値のリセット（at_war → neutral）
+        4. 戦争リストからの削除
+        5. 関連する停戦提案・降伏勧告のクリーンアップ
+        """
+        aggressor = self.state.countries.get(war.aggressor)
+        defender = self.state.countries.get(war.defender)
+        
+        if not aggressor or not defender:
+            return
+        
+        occupation = war.target_occupation_progress  # 0-100スケール
+        
+        # --- 1. 国境線の引き直し + 人口移転 ---
+        if occupation >= 3.0:
+            # 占領率3%以上: 占領率に応じた領土と人口を攻撃側に移転
+            transfer_ratio = occupation / 100.0
+            
+            # 領土の移転
+            transferred_area = defender.area * transfer_ratio
+            defender.area -= transferred_area
+            aggressor.area += transferred_area
+            
+            # 人口の移転（占領地域の住民が攻撃側の管轄下に入る）
+            transferred_pop = defender.population * transfer_ratio
+            defender.population -= transferred_pop
+            aggressor.population += transferred_pop
+        else:
+            # 占有率3%未満: 防衛成功。領土・人口の変更なし
+            transferred_area = 0.0
+            transferred_pop = 0.0
+        
+        # --- 2. 賠償金の精算 ---
+        PUNITIVE_MULTIPLIER = 1.2
+        if occupation < 3.0:
+            # 防衛成功: 防衛側が賠償金を請求
+            reparation = (war.defender_cumulative_military_loss 
+                         + war.defender_cumulative_civilian_gdp_loss) * PUNITIVE_MULTIPLIER
+            payer_state = aggressor
+            receiver_state = defender
+            payer_name = war.aggressor
+            receiver_name = war.defender
+        else:
+            # 占領成功: 攻撃側が賠償金を請求
+            reparation = (war.aggressor_cumulative_military_loss 
+                         + war.aggressor_cumulative_civilian_gdp_loss) * PUNITIVE_MULTIPLIER
+            payer_state = defender
+            receiver_state = aggressor
+            payer_name = war.defender
+            receiver_name = war.aggressor
+        
+        # 賠償金の支払い処理
+        payer_state.government_budget -= reparation
+        receiver_state.government_budget += reparation
+        if payer_state.government_budget < 0:
+            payer_state.national_debt += abs(payer_state.government_budget)
+            payer_state.government_budget = 0.0
+        
+        # --- 3. 関係値のリセット ---
+        self._update_relation(war.aggressor, war.defender, RelationType.NEUTRAL)
+        
+        # --- 4. 戦争リストから削除 ---
+        self.state.active_wars = [
+            w for w in self.state.active_wars 
+            if not (w.aggressor == war.aggressor and w.defender == war.defender)
+        ]
+        
+        # --- 5. 関連する停戦提案・降伏勧告のクリーンアップ ---
+        self.state.pending_ceasefires = [
+            c for c in self.state.pending_ceasefires
+            if not ((c.proposer == war.aggressor and c.target == war.defender) or
+                    (c.proposer == war.defender and c.target == war.aggressor))
+        ]
+        self.state.pending_surrenders = [
+            s for s in self.state.pending_surrenders
+            if not (s.aggressor == war.aggressor and s.defender == war.defender)
+        ]
+        
+        # --- 6. ニュースイベント ---
+        war_duration_years = war.war_turns_elapsed / 4.0  # ターン→年換算
+        
+        if occupation < 3.0:
+            self.log_event(
+                f"🕊️ 【講和成立・防衛成功】{war.aggressor}と{war.defender}の戦争が"
+                f"{war_duration_years:.1f}年間の交戦を経て終結！"
+                f"占領率{occupation:.1f}%は3%未満のため防衛成功と認定。"
+                f"{war.defender}は全領土を維持。"
+                f"{war.aggressor}は賠償金{reparation:.1f}Bドルを{war.defender}に支払います。",
+                involved_countries=[war.aggressor, war.defender, "global"]
+            )
+        else:
+            self.log_event(
+                f"🕊️ 【講和成立】{war.aggressor}と{war.defender}の戦争が"
+                f"{war_duration_years:.1f}年間の交戦を経て終結！"
+                f"占領率{occupation:.1f}%に基づき、{transferred_area:.0f}km²の領土と"
+                f"{transferred_pop:.2f}M人の人口が{war.aggressor}に移転。"
+                f"{payer_name}は賠償金{reparation:.1f}Bドルを{receiver_name}に支払います。",
+                involved_countries=[war.aggressor, war.defender, "global"]
+            )
+        
+        self.sys_logs_this_turn.append(
+            f"[講和会談] {war.aggressor} vs {war.defender}: "
+            f"占領率={occupation:.1f}%, 領土移転={transferred_area:.0f}km², "
+            f"人口移転={transferred_pop:.2f}M, 賠償金={reparation:.1f}B "
+            f"(累積損害: 攻撃側軍事={war.aggressor_cumulative_military_loss:.1f}, "
+            f"攻撃側民間={war.aggressor_cumulative_civilian_gdp_loss:.1f}, "
+            f"防衛側軍事={war.defender_cumulative_military_loss:.1f}, "
+            f"防衛側民間={war.defender_cumulative_civilian_gdp_loss:.1f})"
+        )

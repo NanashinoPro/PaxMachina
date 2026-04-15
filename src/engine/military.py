@@ -47,6 +47,14 @@ class MilitaryMixin:
             aggressor.population = max(0.1, aggressor.population - agg_pop_loss)
             defender.population = max(0.1, defender.population - def_pop_loss)
             
+            # 累積損害の記録（講和時の賠償金計算用）
+            war.aggressor_cumulative_military_loss += agg_damage
+            war.defender_cumulative_military_loss += def_damage
+            agg_gdp_per_capita = aggressor.economy / max(0.1, aggressor.population)
+            def_gdp_per_capita = defender.economy / max(0.1, defender.population)
+            war.aggressor_cumulative_civilian_gdp_loss += agg_pop_loss * agg_gdp_per_capita
+            war.defender_cumulative_civilian_gdp_loss += def_pop_loss * def_gdp_per_capita
+            
             # 経済デバフ（戦争状態による疲弊 + 投入比率に応じた追加負担）
             agg_war_drain = 1.0 - (COMMITMENT_ECONOMIC_DRAIN * agg_commit)
             def_war_drain = 1.0 - (COMMITMENT_ECONOMIC_DRAIN * def_commit)
