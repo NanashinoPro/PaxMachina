@@ -81,10 +81,12 @@ class EventsMixin:
         for name, prob, min_dmg, max_dmg in GLOBAL_DISASTERS:
             if random.random() < prob:
                 # 歪正規分布を用いてダメージを決定。a=4は正の歪み（低い値が多く、稀に高い値）
-                # scale（標準偏差的）をmax_dmgの20%に縮小し、意外な大損失を抑制
+                # scale = レンジ幅の15%: min_dmg付近に集中し、max_dmgに到達する確率を著しく低く抑える
+                # max_dmg/min_dmgでハードキャップ: 定数で定義した最大値は絶対に超えない
                 a = 4
-                damage = skewnorm.rvs(a, loc=min_dmg, scale=max_dmg * 0.2)
-                damage = max(min_dmg, damage)
+                scale = (max_dmg - min_dmg) * 0.15
+                damage = skewnorm.rvs(a, loc=min_dmg, scale=scale)
+                damage = min(max_dmg, max(min_dmg, damage))
                 new_event = DisasterEvent(turn=self.state.turn, name=name, damage_percent=damage)
                 self.state.disaster_history.append(new_event)
                 
@@ -110,10 +112,12 @@ class EventsMixin:
                     
                 if random.random() < actual_prob:
                     # 歪正規分布を用いてダメージを決定。a=4は正の歪み（低い値が多く、稀に高い値）
-                    # scale（標準偏差的）をmax_dmgの20%に縮小し、意外な大損失を抑制
+                    # scale = レンジ幅の15%: min_dmg付近に集中し、max_dmgに到達する確率を著しく低く抑える
+                    # max_dmg/min_dmgでハードキャップ: 定数で定義した最大値は絶対に超えない
                     a = 4
-                    damage = skewnorm.rvs(a, loc=min_dmg, scale=max_dmg * 0.2)
-                    damage = max(min_dmg, damage)
+                    scale = (max_dmg - min_dmg) * 0.15
+                    damage = skewnorm.rvs(a, loc=min_dmg, scale=scale)
+                    damage = min(max_dmg, max(min_dmg, damage))
                     new_event = DisasterEvent(turn=self.state.turn, country=country_name, name=name, damage_percent=damage)
                     self.state.disaster_history.append(new_event)
                     
