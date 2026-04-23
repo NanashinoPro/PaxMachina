@@ -544,26 +544,16 @@ def main():
                     sns_timelines[target].append({"author": "Espionage", "text": sns_post})
                     
         # 一般国民
-        # 当ターンの災害イベントを抽出（国民が知り得る情報）
-        disaster_events_this_turn = [
-            e for e in world_state.news_events
-            if any(k in e for k in ["🚨", "災害", "地震", "洪水", "台風", "噴火", "飢饉"])
-        ]
         for country, state in world_state.countries.items():
             if country not in sns_timelines:
                 continue
             current_posts = len(sns_timelines[country])
             needed = 5 - current_posts
             if needed > 0:
-                citizen_posts = agent_system.generate_citizen_sns_posts(
-                    country, state, world_state, needed,
-                    media_reports=media_reports,
-                    disaster_events=disaster_events_this_turn,
-                )
+                citizen_posts = agent_system.generate_citizen_sns_posts(country, state, world_state, needed)
                 for p in citizen_posts:
                     if p and p.strip():
                          sns_timelines[country].append({"author": "Citizen", "text": p})
-
                          
         # 分裂ロジック等のためにエンジンのステートに現ターンのSNSログを保存
         engine.turn_sns_logs = sns_timelines.copy()
@@ -595,19 +585,19 @@ def main():
     print(f"シミュレーションログは {logger.sim_log_dir}/ に保存されています。")
     print(f"システムログは {logger.sys_log_dir}/ に保存されています。")
     
-    # 最後にシミュレーションの要約を自動生成 (コスト計算に含めるため先に実行)　-> サマリーは別途作成するためスキップ
-    # try:
-    #     if hasattr(logger, 'sim_log_file'):
-    #         summary_info = summarizer.generate_summary(logger.sim_log_file, force=True)
-    #         if summary_info and "usage" in summary_info:
-    #             agent_system.token_usage["サマリー生成"] = {
-    #                 "model": "gemini-2.5-flash",
-    #                 "prompt_tokens": summary_info["usage"]["prompt_tokens"],
-    #                 "candidates_token_count": summary_info["usage"]["candidates_token_count"],
-    #                 "thoughts_token_count": summary_info["usage"].get("thoughts_token_count", 0)
-    #             }
-    # except Exception as e:
-    #     print(f"Failed to auto-generate summary: {e}")
+    # 最後にシミュレーションの要約を自動生成 (コスト計算に含めるため先に実行)
+    try:
+        if hasattr(logger, 'sim_log_file'):
+            summary_info = summarizer.generate_summary(logger.sim_log_file, force=True)
+            if summary_info and "usage" in summary_info:
+                agent_system.token_usage["サマリー生成"] = {
+                    "model": "gemini-2.5-flash",
+                    "prompt_tokens": summary_info["usage"]["prompt_tokens"],
+                    "candidates_token_count": summary_info["usage"]["candidates_token_count"],
+                    "thoughts_token_count": summary_info["usage"].get("thoughts_token_count", 0)
+                }
+    except Exception as e:
+        print(f"Failed to auto-generate summary: {e}")
 
     # コスト計算と出力
     print("\n" + "="*50)

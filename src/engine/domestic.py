@@ -479,22 +479,3 @@ class DomesticMixin:
             f"HCI:{old_hci:.3f} -> {country.human_capital_index:.3f} (MYS:{old_mys:.2f} -> {country.mean_years_schooling:.2f}), "
             f"支持率:{old_approval:.1f}% -> {country.approval_rating:.1f}%"
         )
-
-        # ===== 情報偽装（対外発表値）の更新 =====
-        # AIが report_economy / report_military を設定した場合、reported_* に保存する
-        # クランプなし：急激な変化で他国に不審がられるリスクはAIが戦略的に判断
-        report_econ = getattr(action.domestic_policy, 'report_economy', None)
-        report_mil  = getattr(action.domestic_policy, 'report_military', None)
-        if report_econ is not None:
-            country.reported_economy = max(0.0, float(report_econ))
-            dev = abs(country.reported_economy - country.economy) / max(1.0, country.economy) * 100.0
-            self.sys_logs_this_turn.append(
-                f"[{country_name} 情報偽装] 経済力: 発表値={country.reported_economy:.1f} / 真値={country.economy:.1f} (乖離={dev:.1f}%)"
-            )
-        if report_mil is not None:
-            country.reported_military = max(0.0, float(report_mil))
-            dev_m = abs(country.reported_military - country.military) / max(1.0, country.military) * 100.0
-            self.sys_logs_this_turn.append(
-                f"[{country_name} 情報偽装] 軍事力: 発表値={country.reported_military:.1f} / 真値={country.military:.1f} (乖離={dev_m:.1f}%)"
-            )
-

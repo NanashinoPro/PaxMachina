@@ -8,13 +8,11 @@ def build_analyst_prompt(
     world_state: WorldState,
     target_country_name: str,
     past_news: List = None,
-    use_real_stats: bool = False,
 ) -> str:
     """統合型分析官のプロンプトを構築する。
     
     対象国1国に対して、外交・軍事・経済の3観点から包括的な分析レポートを生成する。
     このレポートは外務大臣・防衛大臣・財務大臣の3者に共有される。
-    use_real_stats=True の場合、諜報成功により真値が取得されており、偽装値との比較を含む。
     """
     target_state = world_state.countries.get(target_country_name)
     if not target_state:
@@ -95,43 +93,13 @@ def build_analyst_prompt(
         elif p.donor == country_name and p.target == target_country_name:
             pending_aid_info += f"保留中の援助: 自国→{target_country_name} (経済{p.amount_economy:.1f}, 軍事{p.amount_military:.1f})\n"
     
-    # 情報偽装: 諜報成功(use_real_stats=True)なら真値を提示、失敗なら偽装値を提示
-    displayed_economy  = target_state.reported_economy  if (target_state.reported_economy  is not None and not use_real_stats) else target_state.economy
-    displayed_military = target_state.reported_military if (target_state.reported_military is not None and not use_real_stats) else target_state.military
-    
-    # 諜報成功かつ偽装が検出された場合の機密情報ヘッダーを生成
-    deception_intel_header = ""
-    if use_real_stats:
-        deception_details = []
-        if target_state.reported_economy is not None:
-            dev_e = abs(target_state.reported_economy - target_state.economy) / max(1.0, target_state.economy) * 100.0
-            deception_details.append(
-                f"経済力: 公式発表={target_state.reported_economy:.1f} / 実際={target_state.economy:.1f} (乖離={dev_e:.1f}%)"
-            )
-        if target_state.reported_military is not None:
-            dev_m = abs(target_state.reported_military - target_state.military) / max(1.0, target_state.military) * 100.0
-            deception_details.append(
-                f"軍事力: 公式発表={target_state.reported_military:.1f} / 実際={target_state.military:.1f} (乖離={dev_m:.1f}%)"
-            )
-        if deception_details:
-            deception_intel_header = (
-                f"\n⚠️【機密情報：諜報成功】対象国「{target_country_name}」の公式発表値に偽装が発見されました！\n"
-                + "\n".join(deception_details) + "\n"
-                + "以下の数値は真値を反映しています。この情報は自国のみが知る極秘情報です。大臣には必ず共有してください。\n"
-            )
-        else:
-            deception_intel_header = (
-                f"\n✅【諜報成功（偽装なし確認）】対象国「{target_country_name}」の公式発表値に偽装の証拠は発見されませんでした。\n"
-            )
-    
     target_info = (
         f"---分析対象国: {target_country_name} の詳細情報---\n"
-        f"{deception_intel_header}"
         f"政治体制: {target_state.government_type.value}\n"
         f"イデオロギー: {target_state.ideology}\n"
-        f"経済力(GDP): {displayed_economy:.1f}\n"
-        f"1人当たりGDP: {(displayed_economy / max(0.1, target_state.population)):.1f}\n"
-        f"軍事力: {displayed_military:.1f}\n"
+        f"経済力(GDP): {target_state.economy:.1f}\n"
+        f"1人当たりGDP: {(target_state.economy / max(0.1, target_state.population)):.1f}\n"
+        f"軍事力: {target_state.military:.1f}\n"
         f"諜報レベル: {target_state.intelligence_level:.1f}\n"
         f"人口: {target_state.population:.1f}百万人\n"
         f"支持率: {target_state.approval_rating:.1f}%\n"

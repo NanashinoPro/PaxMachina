@@ -67,72 +67,30 @@ class GeminiSentimentAnalyzer:
 def generate_citizen_sns_posts(
     generate_func,
     logger: SimulationLogger,
-    country_name: str,
-    country_state: CountryState,
-    world_state: WorldState,
-    count: int,
-    media_reports: List[str] = None,
-    disaster_events: List[str] = None,
+    country_name: str, 
+    country_state: CountryState, 
+    world_state: WorldState, 
+    count: int
 ) -> List[str]:
-    """国民エージェントによるSNS投稿生成。
-    
-    国民が閲覧できる情報は以下に限定（情報偽装システムとの整合性）:
-    - 政府の公式発表値（reported_* 優先）
-    - 災害イベント
-    - 他国のSNS投稿（Leader/Citizen のみ）
-    - 各国メディア記事
-    真値・hidden_plans・外交内部情報は一切含まない。
-    """
+    """国民エージェントによるSNS投稿生成"""
     if count <= 0:
         return []
-
-    # 政府公式発表値（偽装値優先）
-    displayed_economy  = country_state.reported_economy  if country_state.reported_economy  is not None else country_state.economy
-    displayed_military = country_state.reported_military if country_state.reported_military is not None else country_state.military
-
+        
+    recent_news = "\n".join([f"- {news}" for news in world_state.news_events[-3:]]) if world_state.news_events else "特になし"
     history_str = ""
     if country_state.stat_history:
-        history_str = "- 過去のパラメーター推移:\n" + "\n".join(
-            [f"  T{s['turn']}: 経済力 {s['economy']}, 支持率 {s['approval_rating']}%" for s in country_state.stat_history]
-        ) + "\n"
-
-    # 他国SNS（公開投稿のみ・各国3件まで）
-    other_sns_lines = []
-    for cname, posts in world_state.sns_logs.items():
-        if cname == country_name:
-            continue
-        for p in posts[-3:]:
-            if isinstance(p, dict) and p.get('author') in ('Leader', 'Citizen'):
-                other_sns_lines.append(f"[{cname}] {p.get('text', '')}")
-    other_sns_str = "\n".join(other_sns_lines[-10:]) if other_sns_lines else "なし"
-
-    # メディア記事（🗞️マークがついているもの）
-    media_str = "\n".join((media_reports or [])[-5:]) if media_reports else "なし"
-
-    # 災害情報
-    disaster_str = "\n".join(disaster_events or []) if disaster_events else "なし"
-
+        history_str = "- 過去のパラメーター推移:\n" + "\n".join([f"  T{s['turn']}: 経済力 {s['economy']}, 支持率 {s['approval_rating']}%" for s in country_state.stat_history]) + "\n"
+    
     prompt = f"""あなたは{country_name}に住む一般の国民です。
-以下の「国民が知り得る情報」のみを参考にSNS投稿を作成してください。
-（政府の内部計画・外交の詳細・軍事機密などは一切知りません）
-
-【政府公式発表】
+現在の自国の状況は以下の通りです：
 - 政治体制: {country_state.government_type.value}
-- 経済力（政府発表）: {displayed_economy:.1f}
-- 軍事力（政府発表）: {displayed_military:.1f}
+- 経済状況: {country_state.economy:.1f}
 - 政府支持率: {country_state.approval_rating:.1f}%
-{history_str}
-【報道されている災害・大事件】
-{disaster_str}
-
-【各国メディア記事】
-{media_str}
-
-【他国のSNS上の声】
-{other_sns_str}
+{history_str}- 最近の世界的ニュース:
+{recent_news}
 
 **指示**:
-上記の情報を踏まえ、あなたがSNSに投稿するであろう内容を{count}件作成してください。
+現在の政府への支持率や経済状況、ニュースを踏まえ、あなたがSNSに投稿するであろう内容を{count}件作成してください。
 支持率が低ければ不満や批判を、高ければ称賛や日常の平和を反映させてください。
 1件あたり最大100文字以内で、リアルな国民の声を日本語で表現してください。
 出力は以下のJSONリストフォーマットで厳密に返してください。
@@ -377,41 +335,6 @@ def generate_media_reports(
                     f"指示: この情報を基に、政権の腐敗（買収、隠蔽、汚職、非道徳的な工作など）といった具体的なスキャンダル要素をあなた自身で創作・追加して、政府を激しく追及・批判する特大スクープ記事を生成してください。（※支持率が大きくマイナスになるように）\n\n"
                 )
 
-            # ---- 他国スキャンダル暴露（新規）----
-            # 自国の報道の自由度 × 15% の確率で、他国の統計偽装または内部情報を暴露する
-            # 対象: 全国（偽装あり・なし問わず）
-            other_scandal_text = ""
-            other_scandal_chance = country_state.press_freedom * 0.15
-            for target_cname, target_cstate in world_state.countries.items():
-                if target_cname == country_name:
-                    continue
-                if random.random() > other_scandal_chance:
-                    continue
-                # 偽装が存在する場合 → 統計捏造疑惑スキャンダル
-                has_deception = (target_cstate.reported_economy is not None or target_cstate.reported_military is not None)
-                if has_deception:
-                    deception_lines = []
-                    if target_cstate.reported_economy is not None:
-                        deception_lines.append(f"経済力公式発表={target_cstate.reported_economy:.1f}（実態との乖離疑惑）")
-                    if target_cstate.reported_military is not None:
-                        deception_lines.append(f"軍事力公式発表={target_cstate.reported_military:.1f}（実態との乖離疑惑）")
-                    other_scandal_text += (
-                        f"【他国スキャンダル】{target_cname}の公式統計に重大な捏造疑惑が浮上しました。\n"
-                        f"疑惑の焦点: {', '.join(deception_lines)}\n"
-                        f"指示: {target_cname}の経済統計・軍事力に深刻な水増し/過小申告の疑いがあることを報道してください。\n\n"
-                    )
-                    logger.sys_log(f"[Media: {country_name}→{target_cname}] 他国統計偽装暴露スキャンダル発動")
-                else:
-                    # 偽装なし → 従来型スキャンダル（hidden_plans や一般的な政治腐敗）
-                    scandal_material = target_cstate.hidden_plans if target_cstate.hidden_plans else f"{target_cname}の外交政策や内政の動向"
-                    other_scandal_text += (
-                        f"【他国スキャンダル報道】{target_cname}に関する重大な疑惑が浮上しています。\n"
-                        f"情報の断片: {scandal_material[:200]}\n"
-                        f"指示: 上記の情報を手がかりに、{target_cname}の政治腐敗・外交的欺瞞・経済的失政などのスキャンダルを創作・報道してください。\n\n"
-                    )
-                    logger.sys_log(f"[Media: {country_name}→{target_cname}] 他国一般スキャンダル発動")
-
-
             if country_state.government_type == GovernmentType.DEMOCRACY:
                 role_desc = "あなたは自由民主主義国家の独立した報道機関（メディア）です。「第四の権力」として政府を監視しますが、極秘の諜報活動（成功したスパイ活動や工作プロセス等）を知ることはできず、国内外で公開された政策決断、経済指標、他国で起きたニュースのみに基づいて報道・論評します。失敗や不都合な事実には厳しく批判（支持率マイナス）しますが、経済成長や外交的合意などの成果に対しては適切に称賛し、国民の支持を向上させます（支持率プラス +1.0 ~ +5.0）。単に批判や事実を並べるだけでなく、良い結果には必ずプラスの評価をしてください。"
             else:
@@ -445,11 +368,9 @@ def generate_media_reports(
                 f"世界の最新ニュース（他国の動向）: {world_state.news_events}\n\n"
                 f"{summit_text}\n\n"
                 f"{whistleblowing_scandal}"
-                f"{other_scandal_text}"
                 f"今回の状況を総括する、自国民に向けた象徴的なニュース記事を1つ作成してください。"
                 f"見出しと本文を合わせて100文字程度で、必ず日本語で書いてください。"
                 f"記事の本文のみを出力し、JSON・マークダウン・コードブロック等のフォーマットは一切使わないでください。"
-
             )
             
             response_obj = generate_func(

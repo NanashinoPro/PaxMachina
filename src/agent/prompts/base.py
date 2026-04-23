@@ -164,18 +164,13 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
             
             suzerain_info = f", 宗主国={p_state.suzerain}" if getattr(p_state, 'suzerain', None) else ""
             
-            # 情報偽装: reported_* が設定されている場合は偽装値を表示（他国には真値が見えない）
-            displayed_economy  = p_state.reported_economy  if p_state.reported_economy  is not None else p_state.economy
-            displayed_military = p_state.reported_military if p_state.reported_military is not None else p_state.military
-            
             other_info += (
                 f"- {p_name} ({p_state.government_type.value}): "
-                f"経済力={displayed_economy:.1f}, "
-                f"軍事力={displayed_military:.1f}, "
+                f"経済力={p_state.economy:.1f}, "
+                f"軍事力={p_state.military:.1f}, "
                 f"諜報力={p_state.intelligence_level:.1f}, "
                 f"関係={rel_str}{war_info}{suzerain_info}\n"
             )
-
             
             # 新興独立国/政権交代直後の国に関する援助機会の通知
             # Alesina & Spolaore (2003): 小国は国際支援と貿易開放で大国並みの成長が可能

@@ -227,27 +227,9 @@ class AgentSystem:
             self.logger.sys_log(f"[{country_name}] フェーズ0: 分析官による各国分析を開始 ({len(other_countries)}カ国)")
             for target_name in other_countries:
                 try:
-                    target_state = world_state.countries.get(target_name)
-                    
-                    # ---- 分析官フェーズの確率的諜報判定 ----
-                    # 既存の espionage_gather_intel とは独立した判定（失敗・発覚イベントは一切発生しない）
-                    analyst_intel_success = False
-                    if target_state:
-                        import random as _rnd
-                        attacker_intel = country_state.intelligence_level
-                        target_intel   = target_state.intelligence_level
-                        intel_ratio    = (attacker_intel - target_intel) / max(1.0, target_intel)
-                        base_chance    = 0.30 + (intel_ratio * 0.15)
-                        analyst_intel_success = _rnd.random() < max(0.15, base_chance)
-                        self.logger.sys_log(
-                            f"[{country_name}:分析官(対{target_name})] 諜報判定: "
-                            f"成功率={max(0.15, base_chance):.1%}, 結果={'✅成功' if analyst_intel_success else '❌失敗'}"
-                        )
-                    
                     analyst_prompt = build_analyst_prompt(
                         country_name, country_state, world_state,
-                        target_name, past_news,
-                        use_real_stats=analyst_intel_success
+                        target_name, past_news
                     )
                     report = self._execute_agent(
                         country_name, f"分析官(対{target_name})",
@@ -261,7 +243,6 @@ class AgentSystem:
                     analyst_reports[target_name] = "分析データなし（エラー）"
             
             self.logger.sys_log(f"[{country_name}] フェーズ0完了: {len(analyst_reports)}カ国の分析レポートを取得")
-
         
         # フェーズ1: 4大臣によるプロポーザルの逐次生成（メモリ使用量削減のため並列実行を廃止）
         # 外務・防衛・財務大臣には分析官レポートを渡す
@@ -345,14 +326,8 @@ class AgentSystem:
     def generate_espionage_report(self, attacker_name: str, target_name: str, target_hidden_plans: str, strategy: str) -> Tuple[str, Optional[str]]:
         return intelligence.generate_espionage_report(self._generate_with_retry, self.logger, attacker_name, target_name, target_hidden_plans, strategy)
 
-    def generate_citizen_sns_posts(
-        self, country_name: str, country_state: CountryState, world_state: WorldState, count: int,
-        media_reports: List[str] = None, disaster_events: List[str] = None
-    ) -> List[str]:
-        return media.generate_citizen_sns_posts(
-            self._generate_with_retry, self.logger, country_name, country_state, world_state, count,
-            media_reports=media_reports, disaster_events=disaster_events
-        )
+    def generate_citizen_sns_posts(self, country_name: str, country_state: CountryState, world_state: WorldState, count: int) -> List[str]:
+        return media.generate_citizen_sns_posts(self._generate_with_retry, self.logger, country_name, country_state, world_state, count)
 
     def generate_breakthrough_name(self, country_name: str, active_breakthroughs: List[Any], current_year: int) -> str:
         return media.generate_breakthrough_name(self._generate_with_retry, self.logger, country_name, active_breakthroughs, current_year)

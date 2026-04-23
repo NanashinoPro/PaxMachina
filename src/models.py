@@ -55,11 +55,6 @@ class CountryState(BaseModel):
     # 秘匿情報（他国からは原則見えない真の値）
     # ※AIのプロンプト上では状況に応じて公開・非公開を制御します
     hidden_plans: str = Field("", description="AI自身が記録する秘密の目標や計画")
-    
-    # 情報偽装（対外発表値）
-    # AIが意図的に真値と異なる数値を発表できる。Noneなら偽装なし（真値をそのまま公開）
-    reported_economy: Optional[float] = Field(None, description="対外公式発表の経済力（偽装値）。Noneなら偽装なし。分析官の諜報成功・メディアスキャンダルで真値と比較される")
-    reported_military: Optional[float] = Field(None, description="対外公式発表の軍事力（偽装値）。Noneなら偽装なし")
     leaked_intel: List[str] = Field(default_factory=list, description="過去に他国に漏洩した自国の機密情報の履歴（自国は気づいていない体で管理）")
     stat_history: List[Dict[str, float]] = Field(default_factory=list, description="過去のステータス履歴（直近4ターン分程度保持）")
     private_messages: List[str] = Field(default_factory=list, description="当ターンに他国から受け取った非公開メッセージや提案のリスト")
@@ -75,9 +70,6 @@ class CountryState(BaseModel):
 class DomesticAction(BaseModel):
     """内政アクション（予充分配: 合計100%になること）"""
     tax_rate: float = Field(0.30, description="当期の目標税率（0.10〜0.70等。上げることで予算は増えるが消費と支持率が即時に低下する。下げることで支持率上昇と経済成長ボーナスが得られる）")
-    report_economy: Optional[float] = Field(None, description="【情報偽装】対外公式発表する経済力。Noneなら真値をそのまま発表。意図的に乖離させることで他国の判断を誤誘導できるが、メディアに暴かれるリスクがある。急激な変化は他国に不審がられる可能性を戦略的に考慮すること")
-    report_military: Optional[float] = Field(None, description="【情報偽装】対外公式発表する軍事力。Noneなら真値をそのまま発表")
-    deception_reason: str = Field("", description="情報偽装を行う場合の戦略的理由（偽装しない場合は空文字列でよい）")
     target_press_freedom: float = Field(..., description="当期目標とする報道の自由度（0.0〜1.0。下げるほど秘密裏の工作が暴露されにくくなるが、強権的な統制により即座に支持率が大きく低下するペナルティがある）")
     invest_economy: float = Field(..., description="経済成長への投資割合（0.0-1.0）")
     reasoning_for_military_investment: str = Field(..., description="リチャードソン・モデル（相手の脅威、自国の経済的負担、潜在的敵意）に基づく軍事投資割合の論理的算出プロセス")
