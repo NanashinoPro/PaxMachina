@@ -4,7 +4,7 @@ from typing import Dict, List, Any
 from models import (
     AgentAction, GovernmentType, RelationType, WarState, TradeState,
     SanctionState, SummitProposal, AllianceProposal, AnnexationProposal, CountryState,
-    PendingAidProposal, CeasefireProposal, SurrenderDemand
+    PendingAidProposal, CeasefireProposal, SurrenderDemand, RecurringAid
 )
 
 class DiplomacyMixin:
@@ -34,126 +34,173 @@ class DiplomacyMixin:
 
     def _process_foreign_aid(self, actions: Dict[str, AgentAction]):
         """
-        対外援助の処理（翌ターン承認制）
-        処理順序が重要:
-          1. まず前ターンの pending_aid_proposals を承認処理（受入率適用、天引き、オランダ病等）
-          2. 次に今ターンの新規援助申請を PendingAidProposal として登録（天引きなし）
-        この順序により、今ターンの新規申請が同一ターン内で処理されることを防ぐ。
+        対外援助の処理（サブスク制）
+        処理順序:
+          1. recurring_aid_contracts を全件実行（毎ターン自動継続）
+          2. AIが aid_amount > 0 を出力 → 契約を登録/更新
+             AIが aid_cancel=True を出力 → 契約を解除
         """
         # ============================================================
-        # ステップ1: 前ターンの援助申請の承認処理
+        # ステップ1: 既存のサブスク契約を全件自動実行
         # ============================================================
         received_aid_econ = {name: 0.0 for name in self.state.countries}
-        received_aid_mil = {name: 0.0 for name in self.state.countries}
-        
-        # 前ターンの pending_aid_proposals をすべて処理して空にする
-        proposals_to_process = list(self.state.pending_aid_proposals)
-        self.state.pending_aid_proposals = []  # 全てクリア（新規分はステップ2で追加）
-        
-        for proposal in proposals_to_process:
-            donor_name = proposal.donor
-            target_name = proposal.target
-            
-            # 援助元または受取国が消滅している場合はスキップ
+        received_aid_mil  = {name: 0.0 for name in self.state.countries}
+
+        for contract in list(self.state.recurring_aid_contracts):
+            donor_name  = contract.donor
+            target_name = contract.target
+
+            # 消滅国はスキップ（後のクリーンアップで削除される）
             if donor_name not in self.state.countries or target_name not in self.state.countries:
                 continue
-            
-            donor = self.state.countries[donor_name]
+
+            donor  = self.state.countries[donor_name]
             target = self.state.countries[target_name]
-            
-            # 受取国のアクションから受入率を取得
-            acceptance_ratio = 1.0  # デフォルト: 全額受入
+
+            # 受取国のアクションから受入率を取得（デフォルト1.0=全額受入）
+            acceptance_ratio = 1.0
             if target_name in actions:
-                target_action = actions[target_name]
-                for target_dip in target_action.diplomatic_policies:
+                for target_dip in actions[target_name].diplomatic_policies:
                     if target_dip.target_country == donor_name:
                         acceptance_ratio = getattr(target_dip, 'aid_acceptance_ratio', 1.0)
                         break
-            
-            req_econ = proposal.amount_economy * acceptance_ratio
-            req_mil = proposal.amount_military * acceptance_ratio
+
+            req_econ = contract.amount_economy * acceptance_ratio
+            req_mil  = contract.amount_military * acceptance_ratio
             total_accepted = req_econ + req_mil
-            
-            # 受入率が0の場合（全拒否）
+
+            # 全拒否
             if total_accepted <= 0:
-                self.sys_logs_this_turn.append(f"[{target_name} 援助拒否] {donor_name}からの援助（経済:{proposal.amount_economy:.1f}, 軍事:{proposal.amount_military:.1f}）を全額拒否")
-                self.log_event(f"🚫 【援助拒否】{target_name}が{donor_name}からの援助申請を拒否しました。", involved_countries=[donor_name, target_name])
+                self.sys_logs_this_turn.append(
+                    f"[{target_name} 援助拒否] {donor_name}からのサブスク援助（経済:{contract.amount_economy:.1f}, 軍事:{contract.amount_military:.1f}）を全拒否")
                 continue
-            
+
             # 一部拒否のログ
             if acceptance_ratio < 1.0:
-                rejected_econ = proposal.amount_economy * (1.0 - acceptance_ratio)
-                rejected_mil = proposal.amount_military * (1.0 - acceptance_ratio)
-                self.sys_logs_this_turn.append(f"[{target_name} 援助一部受入] {donor_name}からの援助を{acceptance_ratio*100:.0f}%受入 (拒否分: 経済:{rejected_econ:.1f}, 軍事:{rejected_mil:.1f})")
-                self.log_event(f"💰 【援助一部受入】{target_name}が{donor_name}からの援助を{acceptance_ratio*100:.0f}%受け入れました（経済:{req_econ:.1f}, 軍事:{req_mil:.1f}）。", involved_countries=[donor_name, target_name])
+                self.sys_logs_this_turn.append(
+                    f"[{target_name} 援助一部受入] {donor_name}からの援助を{acceptance_ratio*100:.0f}%受入")
+                self.log_event(
+                    f"💰 【援助一部受入】{target_name}が{donor_name}からの援助を{acceptance_ratio*100:.0f}%受け入れました（経済:{req_econ:.1f}, 軍事:{req_mil:.1f}）。",
+                    involved_countries=[donor_name, target_name])
             else:
-                self.log_event(f"💰 【援助受入】{target_name}が{donor_name}からの援助（経済:{req_econ:.1f}, 軍事:{req_mil:.1f}）を全額受け入れました。", involved_countries=[donor_name, target_name])
-            
-            # 援助元の予算から承認分のみ天引き
+                self.log_event(
+                    f"💰 【援助実行】{target_name}が{donor_name}からのサブスク援助（経済:{req_econ:.1f}, 軍事:{req_mil:.1f}）を受け取りました。",
+                    involved_countries=[donor_name, target_name])
+
+            # 予算上限チェック
             if total_accepted > donor.government_budget:
-                ratio = donor.government_budget / total_accepted
-                req_econ *= ratio
-                req_mil *= ratio
+                ratio      = donor.government_budget / total_accepted
+                req_econ  *= ratio
+                req_mil   *= ratio
                 total_accepted = donor.government_budget
-            
-            donor.government_budget -= total_accepted
+
+            donor.government_budget   -= total_accepted
             received_aid_econ[target_name] += req_econ
-            received_aid_mil[target_name] += req_mil
-            
+            received_aid_mil[target_name]  += req_mil
+
             # 依存度の加算
             dependency_addition = total_accepted / max(1.0, target.economy)
             target.dependency_ratio[donor_name] = target.dependency_ratio.get(donor_name, 0.0) + dependency_addition
-            
-            self.sys_logs_this_turn.append(f"[{donor_name} -> {target_name} 援助実行] 経済: {req_econ:.1f}, 軍事: {req_mil:.1f} (依存度 +{dependency_addition*100:.1f}%)")
 
+            self.sys_logs_this_turn.append(
+                f"[{donor_name} -> {target_name} 援助実行(サブスク)] 経済: {req_econ:.1f}, 軍事: {req_mil:.1f} (依存度 +{dependency_addition*100:.1f}%)")
+
+        # ============================================================
+        # ステップ2: AIの指示による契約の登録/変更/解除
+        # ============================================================
+        for country_name, action in actions.items():
+            if country_name not in self.state.countries:
+                continue
+            for dip in action.diplomatic_policies:
+                target_name = dip.target_country
+                if target_name not in self.state.countries:
+                    continue
+
+                # 解除
+                if getattr(dip, 'aid_cancel', False):
+                    before = len(self.state.recurring_aid_contracts)
+                    self.state.recurring_aid_contracts = [
+                        c for c in self.state.recurring_aid_contracts
+                        if not (c.donor == country_name and c.target == target_name)
+                    ]
+                    if len(self.state.recurring_aid_contracts) < before:
+                        self.sys_logs_this_turn.append(
+                            f"[{country_name} -> {target_name} 援助サブスク解除] 契約を終了しました")
+                        self.log_event(
+                            f"🚫 【援助停止】{country_name}が{target_name}への援助契約を解除しました。",
+                            involved_countries=[country_name, target_name])
+                    continue
+
+                # 登録/変更（aid_amount > 0 の場合のみ）
+                new_econ = getattr(dip, 'aid_amount_economy', 0.0)
+                new_mil  = getattr(dip, 'aid_amount_military', 0.0)
+                if new_econ > 0 or new_mil > 0:
+                    existing = [
+                        c for c in self.state.recurring_aid_contracts
+                        if c.donor == country_name and c.target == target_name
+                    ]
+                    if existing:
+                        # 既存契約を更新
+                        existing[0].amount_economy  = new_econ
+                        existing[0].amount_military = new_mil
+                        self.sys_logs_this_turn.append(
+                            f"[{country_name} -> {target_name} 援助サブスク更新] 経済:{new_econ:.1f}, 軍事:{new_mil:.1f}/ターン")
+                    else:
+                        # 新規契約
+                        self.state.recurring_aid_contracts.append(
+                            RecurringAid(donor=country_name, target=target_name,
+                                         amount_economy=new_econ, amount_military=new_mil))
+                        self.sys_logs_this_turn.append(
+                            f"[{country_name} -> {target_name} 援助サブスク新規登録] 経済:{new_econ:.1f}, 軍事:{new_mil:.1f}/ターン")
+                        self.log_event(
+                            f"💡 【援助開始】{country_name}が{target_name}への援助契約を締結しました（経済:{new_econ:.1f}, 軍事:{new_mil:.1f}/ターン）。",
+                            involved_countries=[country_name, target_name])
+
+        # ============================================================
         # 援助の流入処理、支持率ボーナス、オランダ病判定
+        # ============================================================
         for target_name, target in self.state.countries.items():
             total_econ = received_aid_econ.get(target_name, 0.0)
-            total_mil = received_aid_mil.get(target_name, 0.0)
+            total_mil  = received_aid_mil.get(target_name, 0.0)
             total_received = total_econ + total_mil
-            
+
             if total_received <= 0:
                 continue
-            
+
             # 援助受取の支持率ボーナス（Blair & Roessler 2021）
-            # 政府経由の援助 → 「政府が支援を引き出す能力がある」と評価され、支持率にプラス
-            # log1p で逓減効果を実現し、巨額援助でも支持率が無限に上がらないようにする
             aid_to_gdp_ratio = total_received / max(1.0, target.economy)
             approval_bonus = min(3.0, math.log1p(aid_to_gdp_ratio * 10.0) * 1.5)
             target.approval_rating = min(100.0, target.approval_rating + approval_bonus)
             self.sys_logs_this_turn.append(f"[{target_name} 援助受取ボーナス] 支持率 +{approval_bonus:.1f}% (Blair & Roessler 2021)")
-                
+
             # 吸収能力の限界（オランダ病判定）: 1ターンにGDPの20%以上を受け取ると発症
             limit = target.economy * 0.20
-            
             if total_received > limit:
-                # 限界超過！ 政策実行力が大暴落（最大で0.5倍になる）
                 excess_ratio = (total_received - limit) / target.economy
                 debuff = max(0.5, 1.0 - (excess_ratio * 2.0))
                 self.turn_dutch_disease_penalty[target_name] = debuff
-                
-                # 資金の消滅（モラルハザード: 超過分の50%が虚無に消える）
                 lost_amount = (total_received - limit) * 0.50
                 survival_ratio = (total_received - lost_amount) / total_received
-                
                 total_econ *= survival_ratio
-                total_mil *= survival_ratio
-                
-                self.sys_logs_this_turn.append(f"🚨 [{target_name} オランダ病発症] 莫大な援助により汚職とインフレが蔓延。政策実行力 x{debuff:.2f}。支援金 {lost_amount:.1f} が消散。")
-                self.log_event(f"⚠️ 【援助の呪い】{target_name}に自国の経済規模を上回る巨額の対外援助が流入した結果、急激なインフレと官僚の腐敗（オランダ病）が発生し、国家機能が麻痺しています！")
-                
-                # 支持率も暴落（強制徴用や物価高騰への反発）
+                total_mil  *= survival_ratio
+                self.sys_logs_this_turn.append(
+                    f"🚨 [{target_name} オランダ病発症] 莫大な援助により汚職とインフレが蔓延。政策実行力 x{debuff:.2f}。支援金 {lost_amount:.1f} が消散。")
+                self.log_event(
+                    f"⚠️ 【援助の呪い】{target_name}に自国の経済規模を上回る巨額の対外援助が流入した結果、急激なインフレと官僚の腐敗（オランダ病）が発生し、国家機能が麻痺しています！")
                 target.approval_rating = max(0.0, target.approval_rating - 15.0)
-                
-            # 無事に残った資金を国家のパラメータに反映
-            target.economy += total_econ # 経済援助はGDPを直接ブースト
-            target.military += total_mil # 軍事力ストックに追加
-            
+
+            # パラメータ反映
+            target.economy  += total_econ
+            target.military += total_mil
+
             for donor_name, dep_ratio in target.dependency_ratio.items():
                 if dep_ratio > 0.60 and target.suzerain != donor_name:
                     target.suzerain = donor_name
-                    self.log_event(f"👑 【属国化】{target_name}は{donor_name}からの巨額の経済・軍事支援により主権を喪失し、完全に{donor_name}の属国（傀儡国家）となりました。", involved_countries=[target_name, donor_name, "global"])
-                    self.sys_logs_this_turn.append(f"[{target_name} 属国化] {donor_name}への依存度が {dep_ratio*100:.1f}% に達し、主権喪失。")
+                    self.log_event(
+                        f"👑 【属国化】{target_name}は{donor_name}からの巨額の経済・軍事支援により主権を喪失し、完全に{donor_name}の属国（傀儡国家）となりました。",
+                        involved_countries=[target_name, donor_name, "global"])
+                    self.sys_logs_this_turn.append(
+                        f"[{target_name} 属国化] {donor_name}への依存度が {dep_ratio*100:.1f}% に達し、主権喪失。")
 
 
 

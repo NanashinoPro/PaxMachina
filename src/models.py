@@ -140,11 +140,15 @@ class DiplomaticAction(BaseModel):
     demand_surrender: bool = Field(False, description="交戦中の相手国に降伏勧告を発するか（攻撃側のみ使用可能）")
     accept_surrender: bool = Field(False, description="前ターンに攻撃側から発された降伏勧告を受諾するか（受諾すると占領率が即100%となり国家消滅）")
     
-    # 対外援助 (Foreign Aid)
-    aid_amount_economy: float = Field(0.0, ge=0.0, description="対象国に対する民生・インフラへの経済支援額（自国の政府予算から拠出。翌ターンに相手国が受入判断する）")
-    aid_amount_military: float = Field(0.0, ge=0.0, description="対象国に対する兵器・軍事物資の軍事支援額（自国の政府予算から拠出。翌ターンに相手国が受入判断する）")
-    # 対外援助の受入制御（前ターンに相手国から申請された援助に対して受入率を設定）
-    aid_acceptance_ratio: float = Field(1.0, ge=0.0, le=1.0, description="対象国からの援助申請に対する受入率（0.0〜1.0の連続値。実際の申請額を確認した上で戦略的に判断する。例: 0.0=全拒否、0.3=3割のみ受入、1.0=全額受入。デフォルト1.0=全額受入）")
+    # 対外援助 (Foreign Aid) ─ サブスク制
+    # aid_amount > 0 を指定すると recurring_aid_contracts に登録/更新（毎ターン自動継続）
+    # 変更不要な場合は 0.0 のまま → 既存契約を維持（何もしない）
+    # 停止したい場合は aid_cancel=True → 当該契約を解除
+    aid_amount_economy: float = Field(0.0, ge=0.0, description="【サブスク登録/変更】対象国への経済援助の新規設定額（0.0=変更なし。変更時のみ指定すること）")
+    aid_amount_military: float = Field(0.0, ge=0.0, description="【サブスク登録/変更】対象国への軍事援助の新規設定額（0.0=変更なし。変更時のみ指定すること）")
+    aid_cancel: bool = Field(False, description="【サブスク解除】Trueで対象国への援助契約を全解除する")
+    # 対外援助の受入制御（援助をサブスクしている送り手へのターン毎の受入率）
+    aid_acceptance_ratio: float = Field(1.0, ge=0.0, le=1.0, description="対象国からの援助契約受入率（0.0〜1.0。毎ターン適用。デフォルト1.0=全額受入）")
     
     # パワー・バキューム・オークション (Tullock CSF)
     vacuum_bid: float = Field(0.0, ge=0.0, description="パワー・バキューム・オークションへのベット額（0.0〜自国軍事力）。分裂した新国家に対して軍事介入し吸収を試みる場合に設定。0=介入しない")
@@ -219,11 +223,18 @@ class SurrenderDemand(BaseModel):
     defender: str = Field(..., description="勧告された防衛側の国")
 
 class PendingAidProposal(BaseModel):
-    """保留中の対外援助の申請（翌ターンに受取国が受入判断する）"""
+    """保留中の対外援助の申請（後方互換用・現在はRecurringAidに置換済み）"""
     donor: str = Field(..., description="援助元の国名")
     target: str = Field(..., description="援助先の国名")
     amount_economy: float = Field(0.0, ge=0.0, description="経済援助申請額")
     amount_military: float = Field(0.0, ge=0.0, description="軍事援助申請額")
+
+class RecurringAid(BaseModel):
+    """毎ターン自動継続される援助契約（サブスク型）"""
+    donor: str = Field(..., description="援助元の国名")
+    target: str = Field(..., description="援助先の国名")
+    amount_economy: float = Field(0.0, ge=0.0, description="経済援助額/ターン")
+    amount_military: float = Field(0.0, ge=0.0, description="軍事援助額/ターン")
 
 class BreakthroughState(BaseModel):
     """技術革新（GPTs）の進行状態"""
@@ -258,7 +269,8 @@ class WorldState(BaseModel):
     pending_annexations: List[AnnexationProposal] = Field(default_factory=list, description="前ターンに提案された平和的統合のリスト")
     pending_ceasefires: List[CeasefireProposal] = Field(default_factory=list, description="前ターンに提案された停戦のリスト")
     pending_surrenders: List[SurrenderDemand] = Field(default_factory=list, description="前ターンに発された降伏勧告のリスト")
-    pending_aid_proposals: List[PendingAidProposal] = Field(default_factory=list, description="前ターンに申請された対外援助のリスト（翌ターンに受取国が受入判断する）")
+    pending_aid_proposals: List[PendingAidProposal] = Field(default_factory=list, description="（後方互換）旧pending援助リスト")
+    recurring_aid_contracts: List["RecurringAid"] = Field(default_factory=list, description="毎ターン自動継続される援助契約リスト（サブスク）")
     active_breakthroughs: List[BreakthroughState] = Field(default_factory=list, description="現在進行中の技術革新")
     disaster_history: List[DisasterEvent] = Field(default_factory=list, description="過去に発生した重大災害の履歴")
     pending_vacuum_auctions: List[dict] = Field(default_factory=list, description="分裂により誕生した新国家に対するパワー・バキューム・オークションの保留中リスト")

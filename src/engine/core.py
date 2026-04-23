@@ -71,6 +71,9 @@ class WorldEngine(
         # 5. 保留中の援助申請の削除（従来欠落していた）
         self.state.pending_aid_proposals = [p for p in self.state.pending_aid_proposals if p.donor != eliminated_name and p.target != eliminated_name]
         
+        # 5b. サブスク援助契約の削除
+        self.state.recurring_aid_contracts = [c for c in self.state.recurring_aid_contracts if c.donor != eliminated_name and c.target != eliminated_name]
+        
         # 6. 保留中の停戦提案の削除（従来欠落していた）
         self.state.pending_ceasefires = [c for c in self.state.pending_ceasefires if c.proposer != eliminated_name and c.target != eliminated_name]
         

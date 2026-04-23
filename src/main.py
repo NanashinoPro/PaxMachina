@@ -2,7 +2,7 @@ import time
 import json
 import os
 import random
-from models import WorldState, CountryState, GovernmentType, RelationType, TradeState, SanctionState, WarState, PendingAidProposal
+from models import WorldState, CountryState, GovernmentType, RelationType, TradeState, SanctionState, WarState, PendingAidProposal, RecurringAid
 from engine import WorldEngine
 from agent import AgentSystem
 from logger import SimulationLogger
@@ -139,6 +139,7 @@ def initialize_world() -> WorldState:
         print("⚠️ initial_relations.csv が見つかりません。全関係をNEUTRALで初期化します。")
 
     # 初期援助の即時適用（Turn 1開始時にすでに援助が流れている状態を再現）
+    initial_recurring_aids = []
     for aid in initial_aid_entries:
         donor_state = countries.get(aid["donor"])
         target_state = countries.get(aid["target"])
@@ -147,8 +148,8 @@ def initialize_world() -> WorldState:
             target_state.military += aid["mil"]
             target_state.economy += aid["eco"]
             print(f"  💰 初期援助即時反映: {aid['donor']}→{aid['target']} (経済+{aid['eco']:.1f}, 軍事+{aid['mil']:.1f})")
-            # ② 次ターン分: PendingAidProposalとして登録（AIが継続援助の参考にする）
-            initial_aid_proposals.append(PendingAidProposal(
+            # ② サブスク契約として登録（以降は毎ターン自動継続）
+            initial_recurring_aids.append(RecurringAid(
                 donor=aid["donor"], target=aid["target"],
                 amount_economy=aid["eco"], amount_military=aid["mil"]
             ))
@@ -174,7 +175,7 @@ def initialize_world() -> WorldState:
         active_trades=active_trades,
         active_sanctions=active_sanctions,
         news_events=initial_news,
-        pending_aid_proposals=initial_aid_proposals
+        recurring_aid_contracts=initial_recurring_aids
     )
     return world
 

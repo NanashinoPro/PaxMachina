@@ -123,6 +123,7 @@ B) 防御的現実主義 (Waltz):
       "summit_participants": ["招待国名1", "招待国名2", ...],
       "aid_amount_economy": 0.0,
       "aid_amount_military": 0.0,
+      "aid_cancel": bool（Trueでその国への援助契約を全解除）,
       "aid_acceptance_ratio": 1.0,
       "war_commitment_ratio": 0.1から1.0の数値（交戦中の相手国に対してのみ。防衛大臣の提案を参考に設定。変更不要なら省略可）,
       "propose_ceasefire": bool（交戦中の相手国に停戦を提案するか。防衛大臣・外務大臣の意見を参考に判断）,
