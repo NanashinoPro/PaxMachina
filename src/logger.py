@@ -220,7 +220,7 @@ class SimulationLogger:
                 
             self.console.print(Panel(text, title=f"📱 {country} SNS Timeline", border_style="cyan"))
 
-    def save_turn_log(self, world: WorldState, actions: dict):
+    def save_turn_log(self, world: WorldState, actions: dict, analyst_reports: dict = None):
         """ターン終了時の全状態と行動履歴をJSONファイルに追記保存"""
         filename = self.sim_log_file
         
@@ -229,7 +229,8 @@ class SimulationLogger:
             "year": world.year,
             "quarter": world.quarter,
             "world_state": world.model_dump(),
-            "actions": {k: v.model_dump() for k, v in actions.items()}
+            "actions": {k: v.model_dump() for k, v in actions.items()},
+            "analyst_reports": analyst_reports or {}
         }
         
         with open(filename, "a", encoding="utf-8") as f:

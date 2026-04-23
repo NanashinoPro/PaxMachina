@@ -203,21 +203,44 @@ class AgentSystem:
             self.logger.sys_log(f"[{country_name}:{role}] APIエラー発生: {e}", "ERROR")
             return "{}"
 
-    def generate_actions(self, world_state: WorldState, past_news: List[str] = None) -> Dict[str, AgentAction]:
-        actions = {}
+    def generate_actions(
+        self, world_state: WorldState, past_news: List[str] = None
+    ) -> Tuple[Dict[str, AgentAction], Dict[str, Dict[str, str]]]:
+        """全国家の行動を生成し、(actions, all_analyst_reports) のタプルで返す"""
+        actions: Dict[str, AgentAction] = {}
+        all_analyst_reports: Dict[str, Dict[str, str]] = {}
         for country_name, country_state in world_state.countries.items():
             try:
-                action = self._decide_country_action(country_name, country_state, world_state, past_news)
+                action, analyst_reports = self._decide_country_action(
+                    country_name, country_state, world_state, past_news
+                )
                 actions[country_name] = action
+                all_analyst_reports[country_name] = analyst_reports
             except Exception as e:
                 self.logger.sys_log(f"⚠️ {country_name}の推論中にエラーが発生しました: {e}", "ERROR")
                 traceback.print_exc()
-                actions[country_name] = self._create_fallback_action(country_name, current_tax_rate=country_state.tax_rate)
-                
-        return actions
+                actions[country_name] = self._create_fallback_action(
+                    country_name, current_tax_rate=country_state.tax_rate
+                )
+                all_analyst_reports[country_name] = {}
 
-    def _decide_country_action(self, country_name: str, country_state: CountryState, world_state: WorldState, past_news: List[str] = None) -> AgentAction:
-        """分析官→閣僚→大統領の3段階の意思決定を行う"""
+        return actions, all_analyst_reports
+
+    @staticmethod
+    def _extract_thought_process(proposal_text: str, role: str) -> str:
+        """大臣JSONからthought_processを抽出して大統領向け提言テキストを生成"""
+        try:
+            data = json.loads(proposal_text)
+            thought = data.get("thought_process", "").strip()
+            return f"【{role}の思考・提言】\n{thought}" if thought else f"（{role}の提言なし）"
+        except Exception:
+            return f"（{role}のJSON解析失敗）"
+
+    def _decide_country_action(
+        self, country_name: str, country_state: CountryState,
+        world_state: WorldState, past_news: List[str] = None
+    ) -> Tuple[AgentAction, Dict[str, str]]:
+        """分析官→閣僚→大統領の3段階の意思決定を行い、(AgentAction, analyst_reports) で返す"""
         
         # フェーズ0: 分析官による各国分析 (gemini-2.5-flash-lite)
         analyst_reports = {}
@@ -273,12 +296,13 @@ class AgentSystem:
             
             self.logger.sys_log(f"[{country_name}] フェーズ0完了: {len(analyst_reports)}カ国の分析レポートを取得")
         
-        # フェーズ1: 4大臣によるプロポーザルの逐次生成（メモリ使用量削減のため並列実行を廃止）
-        # 外務・防衛・財務大臣には分析官レポートを渡す
-        foreign_prompt = build_foreign_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=analyst_reports if analyst_reports else None)
-        defense_prompt = build_defense_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=analyst_reports if analyst_reports else None)
+        # フェーズ1: 4大臣によるプロポーザルの逐次生成
+        # 外務・防衛大臣には分析官レポートを渡す（財務大臣は不要）
+        ar = analyst_reports if analyst_reports else None
+        foreign_prompt  = build_foreign_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=ar)
+        defense_prompt  = build_defense_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=ar)
         economic_prompt = build_economic_minister_prompt(country_name, country_state, world_state, past_news)
-        finance_prompt = build_finance_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=analyst_reports if analyst_reports else None)
+        finance_prompt  = build_finance_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=None)
 
         proposals = {}
         minister_tasks = [
@@ -297,31 +321,34 @@ class AgentSystem:
                 proposals[key] = "{}"
 
         # フェーズ2: 大統領による最終決定 (gemini-2.5-pro)
+        # 大臣提案のfull JSONは system.log に記録済み。大統領には thought_process のみ渡す。
+        minister_summaries = {
+            "外務大臣": self._extract_thought_process(proposals.get('foreign',  '{}'), "外務大臣"),
+            "防衛大臣": self._extract_thought_process(proposals.get('defense',  '{}'), "防衛大臣"),
+            "経済大臣": self._extract_thought_process(proposals.get('economic', '{}'), "経済大臣"),
+            "財務大臣": self._extract_thought_process(proposals.get('finance',  '{}'), "財務大臣"),
+        }
         president_prompt = build_president_prompt(
-            country_name, 
-            country_state, 
-            world_state, 
-            foreign_proposal=proposals.get('foreign', '{}'),
-            defense_proposal=proposals.get('defense', '{}'),
-            economic_proposal=proposals.get('economic', '{}'),
-            finance_proposal=proposals.get('finance', '{}'),
+            country_name,
+            country_state,
+            world_state,
+            minister_summaries=minister_summaries,
             past_news=past_news
         )
 
         final_decision_text = self._execute_agent(country_name, "大統領", president_prompt, "actions_president")
-        
         self.logger.sys_log_detail(f"{country_name} President Decision", final_decision_text)
-        
+
         # JSON解析とAgentActionモデルへのマッピング
         try:
             data = json.loads(final_decision_text)
-            return AgentAction(**data)
+            return AgentAction(**data), analyst_reports
         except json.JSONDecodeError as e:
             self.logger.sys_log(f"[{country_name}:大統領] JSON解析エラー: {e}\nRaw={final_decision_text}", "ERROR")
-            return self._create_fallback_action(country_name)
+            return self._create_fallback_action(country_name), analyst_reports
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:大統領] 予期せぬエラー: {e}", "ERROR")
-            return self._create_fallback_action(country_name)
+            return self._create_fallback_action(country_name), analyst_reports
 
     def _create_fallback_action(self, country_name: str, current_tax_rate: float = 0.30) -> AgentAction:
         return AgentAction(

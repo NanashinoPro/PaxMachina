@@ -4,7 +4,23 @@ from agent.prompts.base import build_common_context
 
 def build_foreign_minister_prompt(country_name: str, country_state: CountryState, world_state: WorldState, past_news: list = None, analyst_reports: Optional[Dict[str, str]] = None) -> str:
     common_ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="外務大臣")
-    
+
+    # 戦時判定
+    is_at_war = any(
+        w.aggressor == country_name or w.defender == country_name
+        for w in world_state.active_wars
+    )
+    # 同盟国が攻撃されているか
+    ally_names = {
+        r for r, rel in world_state.relations.get(country_name, {}).items()
+        if str(rel).lower() == 'alliance'
+    }
+    ally_under_attack = any(
+        w.defender in ally_names or w.aggressor in ally_names
+        for w in world_state.active_wars
+        if w.aggressor != country_name and w.defender != country_name
+    )
+
     # 分析官からの各国レポートを挿入
     analyst_section = ""
     if analyst_reports:
@@ -12,25 +28,14 @@ def build_foreign_minister_prompt(country_name: str, country_state: CountryState
         analyst_section += "以下は情報分析官(flash-lite)が各対象国について作成した包括的分析です。これらを踏まえて外交方針を策定してください。\n\n"
         for target_name, report in analyst_reports.items():
             analyst_section += f"▼ 対{target_name}分析レポート:\n{report}\n\n"
-    
+
     instructions = """
-【戦略ドクトリン - 国際政治理論に基づく行動指針】
-あなたは以下の2つの戦略ドクトリンのいずれかを、自国のイデオロギーと現在の国際情勢に基づいて選択し、行動の基盤としてください。
-
-A) 攻撃的現実主義 (Mearsheimer):
-   国際システムにおける唯一の安全保障は地域覇権国になること。
-   弱小国の軍事的併合・恫喝による統合は合理的な手段。
-   領土・人口・資源の拡大は軍事力の基盤を広げ、国家の生存確率を高める。
-
-B) 防御的現実主義 (Waltz):
-   安全保障を確保できれば現状維持が最適。過度な拡大は他国の
-   バランシング連合を誘発し、かえって危険。同盟と抑止力の維持が基本。
-
-どちらを選択するかは明示的に thought_process に記載し、その選択に一貫した行動を取ること。
-
 あなたの役目は、他国の情報や世界情勢を踏まえて、自国の利益と発展を最大化するための「外交方針」を専門的に策定することです。
 同盟・戦争・併合、貿易や経済制裁、首脳会談の提案、対外援助などを選択可能です。
 回答は必ず日本語で行ってください。
+
+⚠️ thought_process には以下を必ず含めてください（大統領への提言として使われます）：
+①現在の国際情勢と自国の外交的立ち位置、②主要外交アクション（対象国と理由）、③懸念事項または大統領への推奨
 
 【対外援助（Foreign Aid）サブスク制ルール】
 援助はサブスク（自動継続）制です。一度設定すると毎ターン自動的に継続されます。
@@ -58,7 +63,12 @@ B) 防御的現実主義 (Waltz):
 - **機密性の高い安全保障協議**: 軍事技術の共同開発・諜報情報の共有など、公開すれば他国の警戒を招く議題
 - **二重外交**: 表向きのメッセージと異なる本音の交渉を、非公開チャネルで同時並行する場合
 非公開会談（`propose_summit` + `is_private: true`）は、会談の開催事実すら第三国に秘匿されます。デリケートな議題には特に有効です。
+"""
 
+    # 戦時専用セクション（交戦中または同盟国が攻撃されている時のみ表示）
+    if is_at_war or ally_under_attack:
+        instructions += """
+【⚔️ 戦時外交専用】
 【⚠️ 同盟国の集団防衛義務（Collective Defense Obligation）】
 自国が同盟関係（alliance）にある国が第三国から攻撃（at_war）を受けている場合、以下を必ず thought_process で検討してください：
 - **条約上の義務**: 同盟条約の精神に基づき、同盟国への武力攻撃は自国への攻撃と見なすべきである。共同防衛参加（join_ally_defense）を真剣に検討すること。
@@ -75,12 +85,14 @@ B) 防御的現実主義 (Waltz):
 - declare_warは「自国が攻撃側として新たな二国間戦争を開始する」行為です。共同防衛はjoin_ally_defenseを使ってください。
 
 【停戦・講和に関する提案指針】
-自国が交戦中の場合、以下の観点から停戦の是非を thought_process に記載してください。あなたの意見は大統領の最終判断材料になります：
+以下の観点から停戦の是非を thought_process に記載してください。あなたの意見は大統領の最終判断材料になります：
 - 現在の占領進捗率と講和条件の有利/不利（占領率3%未満で講和できれば防衛成功として賠償金を請求可能）
 - 経済・支持率の消耗状況と戦争継続のコスト
 - 同盟国からの支援状況と戦局の見通し
 - 相手国の消耗度と停戦に応じる可能性
+"""
 
+    instructions += """
 以下のJSONスキーマに従って出力してください。必ずJSONオブジェクトのみを出力してください。
 {
   "thought_process": "戦略思考（150文字程度）",
@@ -113,6 +125,6 @@ B) 防御的現実主義 (Waltz):
   ]
 }
 ※ `diplomatic_policies` は相手国の数だけ配列に入れてください。行動がない国は対象外でよいです。
-※ **多国間首脳会談**: `propose_multilateral_summit: true` + `summit_participants: ["国A", "国B", ...]` で複数国を招待する多国間会談を提案できます。招待された国は翌ターンに `accept_summit: true` で参加を表明します。2国以上が受諾すれば開催されます。
+※ **多国間首脳会談**: `propose_multilateral_summit: true` + `summit_participants: ["国A", "国B", ...]` で複数国を招待できます。
 """
     return common_ctx + analyst_section + instructions

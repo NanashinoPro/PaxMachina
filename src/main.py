@@ -387,7 +387,7 @@ def main():
             country.government_budget = max(0.0, total_revenue - interest_payment)
 
         print("\n⏳ 首脳AIが状況を分析し、行動を決定しています...")
-        actions = agent_system.generate_actions(world_state, past_news=past_news_queue)
+        actions, all_analyst_reports = agent_system.generate_actions(world_state, past_news=past_news_queue)
         
         # 6. 各国の意思決定
         logger.display_section_header("3. 各国の意思決定")
@@ -582,7 +582,7 @@ def main():
 
         # ログの保存 (敗北国のアクションを除去した上で保存)
         safe_actions = {c: a for c, a in actions.items() if c in world_state.countries}
-        logger.save_turn_log(world_state, safe_actions)
+        logger.save_turn_log(world_state, safe_actions, analyst_reports=all_analyst_reports)
         
         # 10. ターン履歴の保存と時間進行
         past_news_queue.append(world_state.news_events.copy())

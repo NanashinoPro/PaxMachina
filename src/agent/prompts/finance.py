@@ -28,6 +28,10 @@ def build_finance_minister_prompt(country_name: str, country_state: CountryState
 あなたの役目は、自国の財政政策（税率と関税率）を専門的に策定する「財務大臣」です。
 回答は必ず日本語で行ってください。
 
+⚠️ thought_process には以下を必ず含めてください（大統領への提言として使われます）：
+①税率変更の推奨値と理由（財政状況との関係）、②主要な関税変更点と通商戦略
+
+
 【現在の財政状況】
 - GDP: {country_state.economy:.1f}
 - 国家債務: {country_state.national_debt:.1f}（GDP比 {country_state.national_debt / max(1.0, country_state.economy):.1%}）
