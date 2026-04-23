@@ -1,5 +1,5 @@
 country_a,country_b,relation_type,trade,sanctions_a_to_b,sanctions_b_to_a,war_aggressor,tariff_a_to_b,tariff_b_to_a,aggressor_commitment_ratio,defender_commitment_ratio,initial_occupation_progress,initial_aid_economy_a_to_b,initial_aid_military_a_to_b,initial_aid_economy_b_to_a,initial_aid_military_b_to_a
-北朝鮮,韓国,neutral,false,true,true,,0.0,0.0,,,,,,, 
+北朝鮮,韓国,neutral,false,true,true,,0.0,0.0,,,,,,,
 北朝鮮,中国,neutral,true,false,false,,0.05,0.03,,,,,2.5,0.5,
 北朝鮮,ロシア,alliance,true,false,false,,0.03,0.03,,,,,,3.0,5.0
 北朝鮮,日本,neutral,false,true,false,,0.0,0.0,,,,,,,
