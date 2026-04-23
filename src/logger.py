@@ -104,6 +104,15 @@ class SimulationLogger:
             if extra_str:
                  ideology_text += f"\n[{extra_str}]"
             
+            # 支持率表示: 偽装中なら「公表値\n（真値）」で明示
+            if c.reported_approval_rating is not None:
+                approval_display = (
+                    f"[bold yellow]{c.reported_approval_rating:.1f}%[/bold yellow]\n"
+                    f"[dim](真:{c.approval_rating:.1f}%)[/dim]"
+                )
+            else:
+                approval_display = f"{c.approval_rating:.1f}%"
+
             table.add_row(
                 name,
                 "🗳️ 民主" if c.government_type == "democracy" else "👑 専制",
@@ -113,7 +122,7 @@ class SimulationLogger:
                 f"{c.military:.1f}",
                 f"{c.human_capital_index:.2f}",
                 f"{c.intelligence_level:.1f}",
-                f"{c.approval_rating:.1f}%",
+                approval_display,
                 ideology_text
             )
             

@@ -505,7 +505,7 @@ class DiplomacyMixin:
             discovery_chance = max(0.05, sabotage_discovery_base)
             is_discovered = random.random() < discovery_chance
             
-            strategy = action.espionage_sabotage_strategy.lower()
+            strategy = (action.espionage_sabotage_strategy or "").lower()
             
             if is_success:
                 dmg_approval = random.uniform(5.0, 15.0)
