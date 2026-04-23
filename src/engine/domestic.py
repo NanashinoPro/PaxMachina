@@ -392,8 +392,11 @@ class DomesticMixin:
         mobilization_penalty_text = ""
         if mobilization_rate > 0.10: # 10%超過で過剰動員ペナルティ
             excess_mobilization = mobilization_rate - 0.10
-            # ① GDP蒸発（産業空洞化・労働力不足）: 従来通り
-            mobilization_penalty = min(0.5, excess_mobilization * 2.0)
+            # ① GDP蒸発（産業空洞化・労働力不足）: 学術的根拠に基づき上限を修正
+            # 史上最悪クラスのソ連WWII動員でも -34% は「2年間」かけて発生（Wikipedia, Warwick 2024）
+            # 1ターン=四半期なので、最大 -15%/四半期 が現実的な上限
+            # [旧: min(0.5, excess*2.0)] → [新: min(0.15, excess*0.75)]
+            mobilization_penalty = min(0.15, excess_mobilization * 0.75)
             country.economy = max(1.0, country.economy * (1.0 - mobilization_penalty))
 
             # ② 支持率への影響: 学術的根拠に基づき「小さな直接ペナルティ＋反乱リスク大幅加算」に修正
