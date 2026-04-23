@@ -8,12 +8,15 @@ def build_analyst_prompt(
     world_state: WorldState,
     target_country_name: str,
     past_news: List = None,
+    use_real_stats: bool = False,
 ) -> str:
     """統合型分析官のプロンプトを構築する。
     
     対象国1国に対して、外交・軍事・経済の3観点から包括的な分析レポートを生成する。
     このレポートは外務大臣・防衛大臣・財務大臣の3者に共有される。
+    use_real_stats=True の場合、諜報成功により真値が取得されており、偽装値との比較を含む。
     """
+
     target_state = world_state.countries.get(target_country_name)
     if not target_state:
         return ""
