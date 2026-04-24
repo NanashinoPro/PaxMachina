@@ -444,8 +444,9 @@ def main():
         # 7. エンジンによる世界の更新（判定フェーズ）
         world_state = engine.process_turn(actions)
 
-        # v1-2: タスクエージェント制の海峡封鎖決定を処理（diplomatic_policiesの仮想ターゲット方式）
-        engine._process_strait_blockade_actions(actions)
+        # v1-2: タスクエージェント制の海峡封鎖決定を処理（v1-2ブランチ固有、masterでは何もしない）
+        if hasattr(engine, '_process_strait_blockade_actions'):
+            engine._process_strait_blockade_actions(actions)
         
         # 8 & 9. 災害・技術革新、経済制裁などの抽出
         disaster_tech_events = [e for e in world_state.news_events if any(k in e for k in ["💡", "🚨", "技術"])]
