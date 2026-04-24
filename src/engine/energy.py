@@ -5,7 +5,8 @@ src/engine/energy.py  — エネルギー備蓄システム (v1-2)
   1. 起動時に data/energy_import_sources.json を読み込み各国フィールドを初期化
   2. 毎ターン実効エネルギー供給率を計算し備蓄を更新
   3. 危機ステージ遷移時にニュースイベントを発行
-  4. 大統領AIの海峡封鎖宣言・解除を処理
+  4. タスクエージェント制AIの海峡封鎖宣言・解除を処理
+     （diplomatic_policiesの__STRAIT_DECLARE__/__STRAIT_RESOLVE__仮想ターゲット方式）
   5. domestic.py に渡す economy/approval ペナルティを計算・適用
 """
 
@@ -195,31 +196,34 @@ class EnergyMixin:
     # ------------------------------------------------------------------
     # 毎ターン: 大統領AIの海峡封鎖アクション処理
     # ------------------------------------------------------------------
-    def _process_strait_blockade_actions(self) -> None:
+    def _process_strait_blockade_actions(self, actions: dict = None) -> None:
         """
-        各国の PresidentDecision.declare_strait_blockade / resolve_strait_blockade を処理する。
+        各国のAgentAction.diplomatic_policiesに含まれる仮想ターゲットを処理する。
+        - target_country が '__STRAIT_DECLARE__<海峡名>' → 封鎖宣言
+        - target_country が '__STRAIT_RESOLVE__<海峡名>' → 封鎖解除
+
         main.py の turn 処理ループから呼び出す。
+        actions: {国名: AgentAction} の辞書
         """
-        from models import PresidentDecision  # 循環インポート回避
+        if not actions:
+            return
 
-        # 各国の大統領決定を取得（_president_decisions は main.py で収集したdict想定）
-        president_decisions: dict = getattr(self, "_president_decisions", {})
+        for country_name, agent_action in actions.items():
+            dipls = getattr(agent_action, "diplomatic_policies", []) or []
+            for dp in dipls:
+                tc = dp.target_country or ""
 
-        for country_name, decision in president_decisions.items():
-            if not isinstance(decision, PresidentDecision):
-                continue
+                # --- 封鎖宣言 ---
+                if tc.startswith("__STRAIT_DECLARE__"):
+                    strait_name = tc[len("__STRAIT_DECLARE__"):]
+                    if strait_name:
+                        self._try_declare_blockade(country_name, strait_name)
 
-            # --- 封鎖宣言 ---
-            if decision.declare_strait_blockade:
-                self._try_declare_blockade(
-                    country_name, decision.declare_strait_blockade
-                )
-
-            # --- 封鎖解除 ---
-            if decision.resolve_strait_blockade:
-                self._try_resolve_blockade(
-                    country_name, decision.resolve_strait_blockade
-                )
+                # --- 封鎖解除 ---
+                elif tc.startswith("__STRAIT_RESOLVE__"):
+                    strait_name = tc[len("__STRAIT_RESOLVE__"):]
+                    if strait_name:
+                        self._try_resolve_blockade(country_name, strait_name)
 
     def _try_declare_blockade(self, country_name: str, strait_name: str) -> None:
         """海峡封鎖を宣言する。資格チェックあり。"""

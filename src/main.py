@@ -327,8 +327,6 @@ def main():
 
     # S-2: AgentSystemのGemini感情分析器をエンジンに注入
     engine = WorldEngine(initial_state=world_state, analyzer=agent_system.sentiment_analyzer, db_manager=db_manager)
-    # v1-2: エンジン参照をAgentSystemに注入（大統領の海峡封鎖決定をエンジンに渡すため）
-    agent_system._engine_ref = engine
 
     if args.resume:
         # 復元されたstataは前ターンの終了時（時間進行前）のものなので、ここで時間を進めて次ターンを開始する
@@ -432,9 +430,8 @@ def main():
         # 7. エンジンによる世界の更新（判定フェーズ）
         world_state = engine.process_turn(actions)
 
-        # v1-2: 大統領の海峡封鎖決定を処理（_president_decisionsは各国のgenerate_actions内で格納済み）
-        engine._process_strait_blockade_actions()
-        engine._president_decisions.clear()  # 次ターンのためにクリア
+        # v1-2: タスクエージェント制の海峡封鎖決定を処理（diplomatic_policiesの仮想ターゲット方式）
+        engine._process_strait_blockade_actions(actions)
         
         # 8 & 9. 災害・技術革新、経済制裁などの抽出
         disaster_tech_events = [e for e in world_state.news_events if any(k in e for k in ["💡", "🚨", "技術"])]

@@ -13,33 +13,67 @@ from agent.ollama_client import OllamaClient
 
 from models import (
     WorldState, CountryState, AgentAction, DomesticAction, DiplomaticAction,
+    PresidentPolicy,
     MinisterDecisionForeign, MinisterDecisionDefense,
     MinisterDecisionEconomic, MinisterDecisionFinance, PresidentDecision
 )
 from logger import SimulationLogger
 
 from agent.prompts.analyst import build_analyst_prompt
-from agent.prompts.foreign import build_foreign_minister_prompt
-from agent.prompts.defense import build_defense_minister_prompt
-from agent.prompts.economic import build_economic_minister_prompt
-from agent.prompts.finance import build_finance_minister_prompt
-from agent.prompts.president import build_president_prompt
+from agent.prompts.president_policy import build_president_policy_prompt
+from agent.prompts.major_diplomacy import build_major_diplomacy_prompt
+from agent.prompts.budget_normalize import build_budget_normalize_prompt
+
+# domestic
+from agent.prompts.domestic.tax_rate import build_tax_rate_prompt
+from agent.prompts.domestic.tariff import build_tariff_prompt
+from agent.prompts.domestic.invest import (
+    build_economy_invest_prompt,
+    build_welfare_invest_prompt,
+    build_education_invest_prompt,
+)
+from agent.prompts.domestic.governance import (
+    build_press_freedom_prompt,
+    build_deception_prompt,
+    build_parliament_prompt,
+)
+
+# military
+from agent.prompts.military.tasks import (
+    build_military_invest_prompt,
+    build_intel_invest_prompt,
+    build_war_commitment_prompt,
+    build_espionage_gather_prompt,
+    build_espionage_sabotage_prompt,
+)
+
+# diplomatic
+from agent.prompts.diplomatic.tasks import (
+    build_message_prompt,
+    build_trade_prompt,
+    build_sanctions_prompt,
+    build_summit_prompt,
+    build_multilateral_summit_prompt,
+    build_aid_donor_prompt,
+    build_aid_acceptance_prompt,
+    build_power_vacuum_prompt,
+)
 
 from agent.modules.media import GeminiSentimentAnalyzer
 from agent.modules import summit, media, intelligence
 
 load_dotenv()
 
+
 class AgentSystem:
-    """Gemini APIを使用して各国家の意思決定を行うAIエージェントシステム（外務・防衛・経済・財務の大臣と大統領の5エージェント制）"""
-    
-    def __init__(self, logger: SimulationLogger = None, model_name: str = "gemini-2.5-pro", db_manager=None): 
+    """タスクエージェント制: 大統領施政方針(Pro) → 各タスクエージェント(flash/flash-lite) の多段構造"""
+
+    def __init__(self, logger: SimulationLogger = None, model_name: str = "gemini-2.5-pro", db_manager=None):
         self.logger = logger
         self.db_manager = db_manager
-        
+
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            # loggerがNone（ダミーインスタンス）の場合はAPI未設定でもクラッシュしない
             if logger is None:
                 self.client = None
                 self.model_name = model_name
@@ -48,12 +82,11 @@ class AgentSystem:
                 self.ollama_client = None
                 return
             raise ValueError("GEMINI_API_KEYが環境変数に設定されていません。")
-            
+
         self.client = genai.Client(api_key=api_key, http_options={'timeout': 60000})
         self.model_name = model_name
         self.token_usage = {}
-        
-        # サブAPIキーのクライアント初期化（フォールバック用）
+
         sub_api_key = os.environ.get("GEMINI_API_KEY_SUB")
         if sub_api_key:
             self.client_sub = genai.Client(api_key=sub_api_key, http_options={'timeout': 60000})
@@ -63,10 +96,9 @@ class AgentSystem:
             self.client_sub = None
             if self.logger:
                 self.logger.sys_log("[System] サブAPIキー未設定 → フォールバック無効")
-        
+
         self.sentiment_analyzer = GeminiSentimentAnalyzer(self.client, client_sub=self.client_sub, token_usage=self.token_usage)
-        
-        # Ollamaクライアントの初期化
+
         try:
             self.ollama_client = OllamaClient()
             if self.logger:
@@ -78,8 +110,6 @@ class AgentSystem:
 
     @retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=2, min=4, max=30))
     def _generate_with_retry_internal(self, client, model: str, contents: str, config: types.GenerateContentConfig = None, category: str = "default") -> Any:
-        """内部用: 指定されたclientでAPI呼び出しを行う（tenacityリトライ付き）"""
-        # Mistral Small (Ollama) への自動ルーティング
         if model.startswith("mistral-small") and self.ollama_client:
             json_mode = config and hasattr(config, 'response_mime_type') and getattr(config, 'response_mime_type', None) == "application/json"
             temperature = getattr(config, 'temperature', 0.4) if config else 0.4
@@ -93,7 +123,7 @@ class AgentSystem:
             response = client.models.generate_content(model=model, contents=contents, config=config)
         else:
             response = client.models.generate_content(model=model, contents=contents)
-            
+
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             meta = response.usage_metadata
             if category not in self.token_usage:
@@ -101,20 +131,17 @@ class AgentSystem:
             self.token_usage[category]["prompt_tokens"] += getattr(meta, 'prompt_token_count', 0)
             self.token_usage[category]["candidates_token_count"] += getattr(meta, 'candidates_token_count', 0)
             self.token_usage[category]["thoughts_token_count"] += getattr(meta, 'thoughts_token_count', 0) or 0
-            
+
         return response
 
     def _generate_with_retry(self, model: str, contents: str, config: types.GenerateContentConfig = None, category: str = "default") -> Any:
-        """メインキーでAPI呼び出しを試行し、全リトライ失敗時にサブキーへフォールバック"""
         try:
             return self._generate_with_retry_internal(self.client, model, contents, config, category)
         except Exception as main_error:
             if self.client_sub is None:
-                raise  # サブキーなしの場合はそのままエラーを伝播
-            
+                raise
             if self.logger:
                 self.logger.sys_log(f"[API Fallback] メインキーで全リトライ失敗 ({type(main_error).__name__}: {main_error})。サブAPIキーで再試行します...", "WARNING")
-            
             try:
                 response = self._generate_with_retry_internal(self.client_sub, model, contents, config, category)
                 if self.logger:
@@ -123,11 +150,11 @@ class AgentSystem:
             except Exception as sub_error:
                 if self.logger:
                     self.logger.sys_log(f"[API Fallback] サブAPIキーでも失敗しました ({type(sub_error).__name__}: {sub_error})。", "ERROR")
-                raise  # サブキーでも失敗した場合はサブ側のエラーを伝播
+                raise
 
     def _create_search_tool(self, country_name: str, role: str = ""):
         db_manager = getattr(self, "db_manager", None)
-        
+
         def search_historical_events(query: str) -> str:
             """過去の重要な外交、内政、諜報に関する出来事の記録やニュースをデータベースから検索します。"""
             if not db_manager:
@@ -139,13 +166,11 @@ class AgentSystem:
                 if not results:
                     self.logger.sys_log(f"[{country_name}{role_str}] 検索結果: 該当なし")
                     return "該当する記録は見つかりませんでした。"
-                
                 res_str = "---検索結果---\n"
                 for r in results:
                     t = r.get("turn", "?")
                     cnt = r.get("content", "")
                     res_str += f"[Turn {t}] {cnt}\n"
-                
                 self.logger.sys_log_detail(f"[{country_name}{role_str}] DB Search Result for '{query}'", res_str)
                 self.logger.sys_log(f"[{country_name}{role_str}] Tool Call: 検索完了 (クエリ: '{query}', 見つかった件数: {len(results)}件)")
                 return res_str
@@ -158,33 +183,27 @@ class AgentSystem:
         """エージェントの推論を実行し、必要に応じて検索ツールを呼び出す"""
         start_time = time.time()
         self.logger.sys_log(f"[{country_name}:{role}] API推論開始...")
-        
+
         search_tool = self._create_search_tool(country_name, role)
         tools = [search_tool] if search_tool else None
-        
+
         target_model = override_model if override_model else self.model_name
 
         try:
             response = self._generate_with_retry(
                 model=target_model,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    tools=tools,
-                    temperature=0.4
-                ),
+                config=types.GenerateContentConfig(tools=tools, temperature=0.4),
                 category=category
             )
-            
-            # ツール呼び出しの処理
+
             if getattr(response, 'function_calls', None):
                 for function_call in response.function_calls:
                     if function_call.name == "search_historical_events":
                         args = function_call.args if isinstance(function_call.args, dict) else dict(function_call.args)
                         query = args.get("query", "")
                         tool_result = search_tool(query)
-                        
                         follow_up_prompt = prompt + f"\n\nエージェントツールからの検索結果 '{query}':\n{tool_result}\n\nこれらを踏まえ、最終的な意思決定を指示されたJSONフォーマットで行ってください。"
-                        
                         response = self._generate_with_retry(
                             model=target_model,
                             contents=follow_up_prompt,
@@ -207,6 +226,683 @@ class AgentSystem:
             self.logger.sys_log(f"[{country_name}:{role}] APIエラー発生: {e}", "ERROR")
             return "{}"
 
+    @staticmethod
+    def _safe_json(text: str) -> dict:
+        try:
+            t = text.strip()
+            if t.startswith("```json"): t = t[7:]
+            if t.startswith("```"): t = t[3:]
+            if t.endswith("```"): t = t[:-3]
+            return json.loads(t.strip())
+        except Exception:
+            return {}
+
+    # =================================================================
+    # Phase 0: 大統領施政方針 + 重大外交
+    # =================================================================
+
+    def _run_phase0_policy(
+        self, country_name: str, country_state: CountryState,
+        world_state: WorldState, past_news: List[str]
+    ) -> PresidentPolicy:
+        """P-01: 大統領施政方針（Pro）"""
+        prompt = build_president_policy_prompt(country_name, country_state, world_state, past_news)
+        raw = self._execute_agent(country_name, "大統領施政方針(P-01)", prompt, "policy", self.model_name)
+        d = self._safe_json(raw)
+        try:
+            policy = PresidentPolicy(
+                stance=d.get("stance", "防御型"),
+                directives=d.get("directives", []),
+                hidden_plans=d.get("hidden_plans", ""),
+                sns_posts=d.get("sns_posts", []),
+            )
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:P-01] パースエラー: {e}", "ERROR")
+            policy = PresidentPolicy(stance="防御型", directives=["現状維持"], hidden_plans="", sns_posts=[])
+        self.logger.sys_log_detail(f"{country_name} P-01 Policy", raw)
+        return policy
+
+    def _run_phase0_major_diplomacy(
+        self, country_name: str, country_state: CountryState,
+        world_state: WorldState, policy: PresidentPolicy, past_news: List[str]
+    ) -> dict:
+        """P-02: 重大外交決定（flash） → dict形式で返す"""
+        prompt = build_major_diplomacy_prompt(country_name, country_state, world_state, policy, past_news)
+        raw = self._execute_agent(country_name, "重大外交(P-02)", prompt, "major_diplomacy", "gemini-2.5-flash")
+        d = self._safe_json(raw)
+        self.logger.sys_log_detail(f"{country_name} P-02 MajorDiplomacy", raw)
+        return d
+
+    # =================================================================
+    # Phase 1-A: 分析官レポート
+    # =================================================================
+
+    def _run_phase1a_analysis(
+        self, country_name: str, country_state: CountryState,
+        world_state: WorldState, past_news: List[str]
+    ) -> Dict[str, str]:
+        """A-01: 分析官レポート（flash-lite × 他国数）"""
+        import random
+        analyst_reports: Dict[str, str] = {}
+        other_countries = [n for n in world_state.countries if n != country_name]
+        if not other_countries:
+            return analyst_reports
+
+        self.logger.sys_log(f"[{country_name}] Phase1-A: 分析官起動 ({len(other_countries)}カ国)")
+        for target_name in other_countries:
+            try:
+                target_state = world_state.countries.get(target_name)
+                has_deception = target_state is not None and any([
+                    target_state.reported_economy is not None,
+                    target_state.reported_military is not None,
+                    target_state.reported_approval_rating is not None,
+                    target_state.reported_intelligence_level is not None,
+                    target_state.reported_gdp_per_capita is not None,
+                ])
+                use_real_stats = False
+                if has_deception and target_state is not None:
+                    my_intel = max(1.0, country_state.intelligence_level)
+                    enemy_intel = max(1.0, target_state.intelligence_level)
+                    success_prob = my_intel / (my_intel + enemy_intel)
+                    roll = random.random()
+                    use_real_stats = (roll < success_prob)
+                    result_str = "✅ 諜報成功（真値取得）" if use_real_stats else "❌ 諜報失敗（偽装値のまま）"
+                    self.logger.sys_log(
+                        f"[{country_name}→{target_name} 諜報判定] "
+                        f"自国:{my_intel:.1f} / 相手:{enemy_intel:.1f} "
+                        f"成功確率:{success_prob:.1%} | roll:{roll:.3f} → {result_str}"
+                    )
+
+                analyst_prompt = build_analyst_prompt(
+                    country_name, country_state, world_state,
+                    target_name, past_news, use_real_stats=use_real_stats
+                )
+                report = self._execute_agent(
+                    country_name, f"分析官(対{target_name})",
+                    analyst_prompt, "analyst", "gemini-2.5-flash-lite"
+                )
+                analyst_reports[target_name] = report
+                self.logger.sys_log_detail(f"{country_name} Analyst Report (vs {target_name})", report)
+            except Exception as exc:
+                self.logger.sys_log(f"[{country_name}:分析官(対{target_name})] 例外: {exc}", "ERROR")
+                analyst_reports[target_name] = "分析データなし（エラー）"
+
+        self.logger.sys_log(f"[{country_name}] Phase1-A完了: {len(analyst_reports)}カ国分析済")
+        return analyst_reports
+
+    # =================================================================
+    # Phase 1-B: 外交タスク群（D-01〜D-08）
+    # =================================================================
+
+    def _run_phase1b_diplomacy(
+        self, country_name: str, country_state: CountryState,
+        world_state: WorldState, policy: PresidentPolicy,
+        analyst_reports: Dict[str, str], past_news: List[str]
+    ) -> List[DiplomaticAction]:
+        """D-01〜D-08: 外交タスク群を実行しDiplomaticActionリストにマージ"""
+        merged: Dict[str, DiplomaticAction] = {}
+
+        def get_or_create(tc: str) -> DiplomaticAction:
+            if tc not in merged:
+                merged[tc] = DiplomaticAction(target_country=tc, reason="タスクエージェント統合")
+            return merged[tc]
+
+        # D-01: メッセージ送信
+        try:
+            raw = self._execute_agent(country_name, "外交:メッセージ(D-01)",
+                build_message_prompt(country_name, country_state, world_state, policy, analyst_reports, past_news),
+                "dipl_message", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            for m in d.get("messages", []):
+                tc = m.get("target_country", "")
+                if not tc: continue
+                a = get_or_create(tc)
+                a.message = m.get("message")
+                a.is_private = m.get("is_private", False)
+                a.reason = m.get("reason", a.reason)
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:D-01] エラー: {e}", "ERROR")
+
+        # D-02: 貿易協定
+        try:
+            raw = self._execute_agent(country_name, "外交:貿易(D-02)",
+                build_trade_prompt(country_name, country_state, world_state, policy, past_news),
+                "dipl_trade", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            for t in d.get("trade_actions", []):
+                tc = t.get("target_country", "")
+                if not tc: continue
+                a = get_or_create(tc)
+                a.propose_trade = t.get("propose_trade", False)
+                a.cancel_trade = t.get("cancel_trade", False)
+                if t.get("reason"): a.reason = t["reason"]
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:D-02] エラー: {e}", "ERROR")
+
+        # D-03: 経済制裁
+        try:
+            raw = self._execute_agent(country_name, "外交:制裁(D-03)",
+                build_sanctions_prompt(country_name, country_state, world_state, policy, past_news),
+                "dipl_sanctions", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            for s in d.get("sanction_actions", []):
+                tc = s.get("target_country", "")
+                if not tc: continue
+                a = get_or_create(tc)
+                a.impose_sanctions = s.get("impose_sanctions", False)
+                a.lift_sanctions = s.get("lift_sanctions", False)
+                if s.get("reason"): a.reason = s["reason"]
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:D-03] エラー: {e}", "ERROR")
+
+        # D-04: 首脳会談
+        try:
+            raw = self._execute_agent(country_name, "外交:首脳会談(D-04)",
+                build_summit_prompt(country_name, country_state, world_state, policy, past_news),
+                "dipl_summit", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            for s in d.get("summit_actions", []):
+                tc = s.get("target_country", "")
+                if not tc: continue
+                a = get_or_create(tc)
+                a.propose_summit = s.get("propose_summit", False)
+                a.accept_summit = s.get("accept_summit", False)
+                if s.get("summit_topic"): a.summit_topic = s["summit_topic"]
+                if s.get("reason"): a.reason = s["reason"]
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:D-04] エラー: {e}", "ERROR")
+
+        # D-05: 多国間首脳会談
+        try:
+            raw = self._execute_agent(country_name, "外交:多国間会談(D-05)",
+                build_multilateral_summit_prompt(country_name, country_state, world_state, policy, past_news),
+                "dipl_multilateral", "gemini-2.5-flash")
+            d = self._safe_json(raw)
+            for s in d.get("multilateral_actions", []):
+                tc = s.get("target_country", "")
+                if not tc: continue
+                a = get_or_create(tc)
+                a.propose_multilateral_summit = s.get("propose_multilateral_summit", False)
+                a.accept_summit = a.accept_summit or s.get("accept_summit", False)
+                participants = s.get("summit_participants", [])
+                if participants: a.summit_participants = participants
+                if s.get("summit_topic"): a.summit_topic = s["summit_topic"]
+                if s.get("reason"): a.reason = s["reason"]
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:D-05] エラー: {e}", "ERROR")
+
+        # D-06: 対外援助（送り手）
+        try:
+            raw = self._execute_agent(country_name, "外交:援助送付(D-06)",
+                build_aid_donor_prompt(country_name, country_state, world_state, policy, past_news),
+                "dipl_aid_donor", "gemini-2.5-flash")
+            d = self._safe_json(raw)
+            for aid in d.get("aid_actions", []):
+                tc = aid.get("target_country", "")
+                if not tc: continue
+                a = get_or_create(tc)
+                if aid.get("aid_amount_economy", 0.0) > 0.0:
+                    a.aid_amount_economy = float(aid["aid_amount_economy"])
+                if aid.get("aid_amount_military", 0.0) > 0.0:
+                    a.aid_amount_military = float(aid["aid_amount_military"])
+                a.aid_cancel = aid.get("aid_cancel", False)
+                if aid.get("reason"): a.reason = aid["reason"]
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:D-06] エラー: {e}", "ERROR")
+
+        # D-07: 援助受入率（受け手）
+        try:
+            prompt_d07 = build_aid_acceptance_prompt(country_name, country_state, world_state, policy, past_news)
+            if prompt_d07:  # 援助なし時は空文字
+                raw = self._execute_agent(country_name, "外交:援助受入(D-07)",
+                    prompt_d07, "dipl_aid_accept", "gemini-2.5-flash-lite")
+                d = self._safe_json(raw)
+                for acc in d.get("acceptance_actions", []):
+                    tc = acc.get("target_country", "")
+                    if not tc: continue
+                    a = get_or_create(tc)
+                    a.aid_acceptance_ratio = float(acc.get("aid_acceptance_ratio", 1.0))
+                    if acc.get("reason"): a.reason = acc["reason"]
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:D-07] エラー: {e}", "ERROR")
+
+        # D-08: パワーバキューム入札
+        try:
+            prompt_d08 = build_power_vacuum_prompt(country_name, country_state, world_state, policy, past_news)
+            if prompt_d08:
+                raw = self._execute_agent(country_name, "外交:パワーバキューム(D-08)",
+                    prompt_d08, "dipl_vacuum", "gemini-2.5-flash")
+                d = self._safe_json(raw)
+                for v in d.get("vacuum_actions", []):
+                    tc = v.get("target_country", "")
+                    if not tc: continue
+                    a = get_or_create(tc)
+                    a.vacuum_bid = float(v.get("vacuum_bid", 0.0))
+                    if v.get("reason"): a.reason = v["reason"]
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:D-08] エラー: {e}", "ERROR")
+
+        return list(merged.values())
+
+    # =================================================================
+    # Phase 1-C: 軍事・諜報タスク群（M-01〜M-05）
+    # =================================================================
+
+    def _run_phase1c_military(
+        self, country_name: str, country_state: CountryState,
+        world_state: WorldState, policy: PresidentPolicy,
+        analyst_reports: Dict[str, str], past_news: List[str]
+    ) -> dict:
+        """M-01〜M-05: 軍事・諜報タスク群を実行して辞書で返す"""
+        result = {
+            "invest_military": 0.15,
+            "reasoning_for_military_investment": "デフォルト",
+            "invest_intelligence": 0.05,
+            "war_commitment_ratios": {},
+            "espionage_actions": [],  # List[dict] {target, gather, gather_strategy, sabotage, sabotage_strategy, sabotage_reasoning}
+        }
+
+        # M-01: 軍事投資
+        try:
+            raw = self._execute_agent(country_name, "軍事:投資(M-01)",
+                build_military_invest_prompt(country_name, country_state, world_state, policy, analyst_reports, past_news),
+                "mil_invest", "gemini-2.5-flash")
+            d = self._safe_json(raw)
+            result["invest_military"] = float(d.get("invest_military", 0.15))
+            result["reasoning_for_military_investment"] = d.get("reasoning_for_military_investment", "")
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:M-01] エラー: {e}", "ERROR")
+
+        # M-02: 諜報投資
+        try:
+            raw = self._execute_agent(country_name, "軍事:諜報投資(M-02)",
+                build_intel_invest_prompt(country_name, country_state, world_state, policy, past_news),
+                "mil_intel", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            result["invest_intelligence"] = float(d.get("invest_intelligence", 0.05))
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:M-02] エラー: {e}", "ERROR")
+
+        # M-03: 前線投入比率（交戦中のみ）
+        is_at_war = any(
+            w.aggressor == country_name or w.defender == country_name
+            for w in world_state.active_wars
+        )
+        if is_at_war:
+            try:
+                raw = self._execute_agent(country_name, "軍事:前線投入(M-03)",
+                    build_war_commitment_prompt(country_name, country_state, world_state, policy, past_news),
+                    "mil_commitment", "gemini-2.5-flash")
+                d = self._safe_json(raw)
+                ratios = d.get("war_commitment_ratios", {})
+                result["war_commitment_ratios"] = {k: float(v) for k, v in ratios.items()}
+            except Exception as e:
+                self.logger.sys_log(f"[{country_name}:M-03] エラー: {e}", "ERROR")
+
+        # M-04 + M-05: 諜報収集・破壊工作（他国ごと）
+        other_countries = [n for n in world_state.countries if n != country_name]
+        for target_name in other_countries:
+            esp_entry = {"target": target_name, "gather": False, "gather_strategy": None,
+                         "sabotage": False, "sabotage_strategy": None, "sabotage_reasoning": ""}
+            ar_text = analyst_reports.get(target_name, "")
+
+            # M-04
+            try:
+                raw = self._execute_agent(country_name, f"諜報:収集(M-04)→{target_name}",
+                    build_espionage_gather_prompt(country_name, country_state, world_state, target_name, policy, ar_text, past_news),
+                    "mil_esp_gather", "gemini-2.5-flash-lite")
+                d = self._safe_json(raw)
+                esp_entry["gather"] = bool(d.get("espionage_gather_intel", False))
+                esp_entry["gather_strategy"] = d.get("espionage_intel_strategy")
+            except Exception as e:
+                self.logger.sys_log(f"[{country_name}:M-04→{target_name}] エラー: {e}", "ERROR")
+
+            # M-05
+            try:
+                raw = self._execute_agent(country_name, f"諜報:破壊工作(M-05)→{target_name}",
+                    build_espionage_sabotage_prompt(country_name, country_state, world_state, target_name, policy, ar_text, past_news),
+                    "mil_esp_sabotage", "gemini-2.5-flash")
+                d = self._safe_json(raw)
+                esp_entry["sabotage"] = bool(d.get("espionage_sabotage", False))
+                esp_entry["sabotage_strategy"] = d.get("espionage_sabotage_strategy")
+                esp_entry["sabotage_reasoning"] = d.get("reasoning_for_sabotage", "")
+            except Exception as e:
+                self.logger.sys_log(f"[{country_name}:M-05→{target_name}] エラー: {e}", "ERROR")
+
+            result["espionage_actions"].append(esp_entry)
+
+        return result
+
+    # =================================================================
+    # Phase 1-D: 内政タスク群（I-01〜I-08）
+    # =================================================================
+
+    def _run_phase1d_domestic(
+        self, country_name: str, country_state: CountryState,
+        world_state: WorldState, policy: PresidentPolicy, past_news: List[str]
+    ) -> DomesticAction:
+        """I-01〜I-08: 内政タスク群を実行しDomesticActionに統合"""
+        # デフォルト値
+        tax_rate = country_state.tax_rate
+        target_tariff_rates: Dict[str, float] = {}
+        invest_economy = 0.35
+        invest_welfare = 0.25
+        invest_education_science = 0.05
+        target_press_freedom = country_state.press_freedom
+        report_economy = None; report_military = None
+        report_approval_rating = None; report_intelligence_level = None; report_gdp_per_capita = None
+        deception_reason = ""
+        dissolve_parliament = False
+        reason = "タスクエージェント統合"
+
+        # I-01: 税率
+        try:
+            raw = self._execute_agent(country_name, "内政:税率(I-01)",
+                build_tax_rate_prompt(country_name, country_state, world_state, policy, past_news),
+                "dom_tax", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            tax_rate = float(d.get("tax_rate", tax_rate))
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:I-01] エラー: {e}", "ERROR")
+
+        # I-02: 関税率
+        try:
+            raw = self._execute_agent(country_name, "内政:関税(I-02)",
+                build_tariff_prompt(country_name, country_state, world_state, policy, past_news),
+                "dom_tariff", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            raw_tariffs = d.get("target_tariff_rates", {})
+            target_tariff_rates = {k: float(v) for k, v in raw_tariffs.items()}
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:I-02] エラー: {e}", "ERROR")
+
+        # I-03: 経済投資
+        try:
+            raw = self._execute_agent(country_name, "内政:経済投資(I-03)",
+                build_economy_invest_prompt(country_name, country_state, world_state, policy, past_news),
+                "dom_econ", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            invest_economy = float(d.get("invest_economy", invest_economy))
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:I-03] エラー: {e}", "ERROR")
+
+        # I-04: 福祉投資
+        try:
+            raw = self._execute_agent(country_name, "内政:福祉投資(I-04)",
+                build_welfare_invest_prompt(country_name, country_state, world_state, policy, past_news),
+                "dom_welfare", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            invest_welfare = float(d.get("invest_welfare", invest_welfare))
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:I-04] エラー: {e}", "ERROR")
+
+        # I-05: 教育・科学投資
+        try:
+            raw = self._execute_agent(country_name, "内政:教育投資(I-05)",
+                build_education_invest_prompt(country_name, country_state, world_state, policy, past_news),
+                "dom_edu", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            invest_education_science = float(d.get("invest_education_science", invest_education_science))
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:I-05] エラー: {e}", "ERROR")
+
+        # I-06: 報道の自由度
+        try:
+            raw = self._execute_agent(country_name, "内政:報道統制(I-06)",
+                build_press_freedom_prompt(country_name, country_state, world_state, policy, past_news),
+                "dom_press", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            target_press_freedom = float(d.get("target_press_freedom", target_press_freedom))
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:I-06] エラー: {e}", "ERROR")
+
+        # I-07: 情報偽装
+        try:
+            raw = self._execute_agent(country_name, "内政:情報偽装(I-07)",
+                build_deception_prompt(country_name, country_state, world_state, policy, past_news),
+                "dom_deception", "gemini-2.5-flash")
+            d = self._safe_json(raw)
+            report_economy = d.get("report_economy")
+            report_military = d.get("report_military")
+            report_approval_rating = d.get("report_approval_rating")
+            report_intelligence_level = d.get("report_intelligence_level")
+            report_gdp_per_capita = d.get("report_gdp_per_capita")
+            deception_reason = d.get("deception_reason", "")
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:I-07] エラー: {e}", "ERROR")
+
+        # I-08: 議会解散（民主主義のみ）
+        if country_state.government_type.value == "democracy":
+            try:
+                raw = self._execute_agent(country_name, "内政:議会解散(I-08)",
+                    build_parliament_prompt(country_name, country_state, world_state, policy, past_news),
+                    "dom_parliament", "gemini-2.5-flash-lite")
+                d = self._safe_json(raw)
+                dissolve_parliament = bool(d.get("dissolve_parliament", False))
+            except Exception as e:
+                self.logger.sys_log(f"[{country_name}:I-08] エラー: {e}", "ERROR")
+
+        return DomesticAction(
+            tax_rate=tax_rate,
+            target_tariff_rates=target_tariff_rates,
+            invest_economy=invest_economy,
+            invest_welfare=invest_welfare,
+            invest_education_science=invest_education_science,
+            target_press_freedom=target_press_freedom,
+            report_economy=report_economy,
+            report_military=report_military,
+            report_approval_rating=report_approval_rating,
+            report_intelligence_level=report_intelligence_level,
+            report_gdp_per_capita=report_gdp_per_capita,
+            deception_reason=deception_reason,
+            dissolve_parliament=dissolve_parliament,
+            invest_military=0.15,        # 後でPhase1-Eで上書きされる
+            invest_intelligence=0.05,    # 後でPhase1-Eで上書きされる
+            reasoning_for_military_investment="Phase1-Cより取得",
+            reason=reason,
+        )
+
+    # =================================================================
+    # Phase 1-E: 予算正規化（B-01）
+    # =================================================================
+
+    def _run_phase1e_normalize(
+        self, country_name: str, policy: PresidentPolicy,
+        invest_military: float, invest_intelligence: float,
+        invest_economy: float, invest_welfare: float, invest_education_science: float,
+    ) -> dict:
+        """B-01: 予算正規化（flash-lite）- 合計>1.0の場合のみLLM呼び出し"""
+        total = invest_military + invest_intelligence + invest_economy + invest_welfare + invest_education_science
+        base = {
+            "invest_military": invest_military,
+            "invest_intelligence": invest_intelligence,
+            "invest_economy": invest_economy,
+            "invest_welfare": invest_welfare,
+            "invest_education_science": invest_education_science,
+        }
+        if total <= 1.001:
+            self.logger.sys_log(f"[{country_name}:B-01] 予算合計={total:.3f} ≤ 1.0 → 正規化スキップ")
+            return base
+
+        self.logger.sys_log(f"[{country_name}:B-01] 予算合計={total:.3f} > 1.0 → LLM正規化実行")
+        try:
+            prompt = build_budget_normalize_prompt(
+                country_name, policy,
+                invest_military, invest_intelligence,
+                invest_economy, invest_welfare, invest_education_science,
+            )
+            raw = self._execute_agent(country_name, "予算正規化(B-01)", prompt, "budget_norm", "gemini-2.5-flash-lite")
+            d = self._safe_json(raw)
+            normalized = {
+                "invest_military": float(d.get("invest_military", invest_military)),
+                "invest_intelligence": float(d.get("invest_intelligence", invest_intelligence)),
+                "invest_economy": float(d.get("invest_economy", invest_economy)),
+                "invest_welfare": float(d.get("invest_welfare", invest_welfare)),
+                "invest_education_science": float(d.get("invest_education_science", invest_education_science)),
+            }
+            # LLM結果でも超過している場合はフォールバックで単純按分
+            new_total = sum(normalized.values())
+            if new_total > 1.001:
+                scale = 1.0 / new_total
+                normalized = {k: round(v * scale, 4) for k, v in normalized.items()}
+                self.logger.sys_log(f"[{country_name}:B-01] LLM結果も超過({new_total:.3f}) → 単純按分にフォールバック")
+            return normalized
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}:B-01] エラー: {e} → 単純按分", "ERROR")
+            scale = 1.0 / total
+            return {k: round(v * scale, 4) for k, v in base.items()}
+
+    # =================================================================
+    # マージ: 全タスク出力 → AgentAction
+    # =================================================================
+
+    def _merge_all(
+        self,
+        country_name: str,
+        policy: PresidentPolicy,
+        major_dipl_dict: dict,
+        diplomacy_list: List[DiplomaticAction],
+        military_data: dict,
+        domestic_action: DomesticAction,
+        normalized: dict,
+    ) -> AgentAction:
+        """全タスク出力をAgentActionに統合する"""
+        # --- 予算の正規化値をDomesticActionに反映 ---
+        domestic_action = domestic_action.model_copy(update={
+            "invest_military":          normalized["invest_military"],
+            "invest_intelligence":      normalized["invest_intelligence"],
+            "invest_economy":           normalized["invest_economy"],
+            "invest_welfare":           normalized["invest_welfare"],
+            "invest_education_science": normalized["invest_education_science"],
+            "reasoning_for_military_investment": military_data.get("reasoning_for_military_investment", ""),
+        })
+
+        # --- 外交リストにmilitary_dataの諜報アクションをマージ ---
+        merged: Dict[str, DiplomaticAction] = {a.target_country: a for a in diplomacy_list}
+
+        for esp in military_data.get("espionage_actions", []):
+            tc = esp["target"]
+            if tc not in merged:
+                merged[tc] = DiplomaticAction(target_country=tc, reason="諜報タスク")
+            a = merged[tc]
+            a.espionage_gather_intel = esp.get("gather", False)
+            a.espionage_intel_strategy = esp.get("gather_strategy")
+            a.espionage_sabotage = esp.get("sabotage", False)
+            a.espionage_sabotage_strategy = esp.get("sabotage_strategy")
+            a.reasoning_for_sabotage = esp.get("sabotage_reasoning")
+
+        # --- 前線投入比率をマージ ---
+        for tc, ratio in military_data.get("war_commitment_ratios", {}).items():
+            if tc not in merged:
+                merged[tc] = DiplomaticAction(target_country=tc, reason="前線投入比率変更")
+            merged[tc].war_commitment_ratio = ratio
+
+        # --- P-02: 重大外交をマージ ---
+        for ma in major_dipl_dict.get("major_diplomatic_actions", []):
+            tc = ma.get("target_country", "")
+            if not tc:
+                continue
+            if tc not in merged:
+                merged[tc] = DiplomaticAction(target_country=tc, reason=ma.get("reason", "大統領決定"))
+            a = merged[tc]
+            if ma.get("declare_war"):       a.declare_war       = True
+            if ma.get("propose_alliance"):  a.propose_alliance  = True
+            if ma.get("join_ally_defense"):
+                a.join_ally_defense          = True
+                a.defense_support_commitment = ma.get("defense_support_commitment")
+            if ma.get("propose_annexation"): a.propose_annexation = True
+            if ma.get("accept_annexation"):  a.accept_annexation  = True
+            if ma.get("propose_ceasefire"):  a.propose_ceasefire  = True
+            if ma.get("accept_ceasefire"):   a.accept_ceasefire   = True
+            if ma.get("demand_surrender"):   a.demand_surrender   = True
+            if ma.get("accept_surrender"):   a.accept_surrender   = True
+            if ma.get("reason"):             a.reason             = ma["reason"]
+
+        # --- 海峡封鎖フラグをworld_state側でハンドリングするため、
+        #     declare_strait_blockade / resolve_strait_blockade をDiplomaticActionの
+        #     "STRAIT" 仮想ターゲットに格納する（engine側で解釈） ---
+        declare_blockade = major_dipl_dict.get("declare_strait_blockade")
+        resolve_blockade = major_dipl_dict.get("resolve_strait_blockade")
+        if declare_blockade:
+            strait_key = f"__STRAIT_DECLARE__{declare_blockade}"
+            merged[strait_key] = DiplomaticAction(
+                target_country=strait_key,
+                reason=f"海峡封鎖宣言: {declare_blockade}"
+            )
+        if resolve_blockade:
+            strait_key = f"__STRAIT_RESOLVE__{resolve_blockade}"
+            merged[strait_key] = DiplomaticAction(
+                target_country=strait_key,
+                reason=f"海峡封鎖解除: {resolve_blockade}"
+            )
+
+        return AgentAction(
+            thought_process=policy.hidden_plans or f"{country_name}の施政方針({policy.stance})",
+            sns_posts=policy.sns_posts,
+            update_hidden_plans=policy.hidden_plans,
+            domestic_policy=domestic_action,
+            diplomatic_policies=list(merged.values()),
+        )
+
+    # =================================================================
+    # メイン: 1国の行動を決定する
+    # =================================================================
+
+    def _decide_country_action(
+        self, country_name: str, country_state: CountryState,
+        world_state: WorldState, past_news: List[str] = None
+    ) -> Tuple[AgentAction, Dict[str, str]]:
+        """大統領施政方針 → タスクエージェント群 → マージ の3段フロー"""
+
+        self.logger.sys_log(f"[{country_name}] ===== ターン開始: タスクエージェント制 =====")
+
+        # Phase 0: 施政方針 + 重大外交
+        self.logger.sys_log(f"[{country_name}] Phase0: 大統領施政方針 + 重大外交")
+        policy = self._run_phase0_policy(country_name, country_state, world_state, past_news or [])
+        country_state.hidden_plans = policy.hidden_plans  # 施政方針メモを更新
+        major_dipl_dict = self._run_phase0_major_diplomacy(country_name, country_state, world_state, policy, past_news or [])
+
+        # Phase 1-A: 分析官
+        self.logger.sys_log(f"[{country_name}] Phase1-A: 分析官レポート")
+        analyst_reports = self._run_phase1a_analysis(country_name, country_state, world_state, past_news or [])
+
+        # Phase 1-B: 外交タスク群
+        self.logger.sys_log(f"[{country_name}] Phase1-B: 外交タスク群 (D-01〜D-08)")
+        diplomacy_list = self._run_phase1b_diplomacy(country_name, country_state, world_state, policy, analyst_reports, past_news or [])
+
+        # Phase 1-C: 軍事・諜報タスク群
+        self.logger.sys_log(f"[{country_name}] Phase1-C: 軍事・諜報タスク群 (M-01〜M-05)")
+        military_data = self._run_phase1c_military(country_name, country_state, world_state, policy, analyst_reports, past_news or [])
+
+        # Phase 1-D: 内政タスク群
+        self.logger.sys_log(f"[{country_name}] Phase1-D: 内政タスク群 (I-01〜I-08)")
+        domestic_action = self._run_phase1d_domestic(country_name, country_state, world_state, policy, past_news or [])
+
+        # Phase 1-E: 予算正規化
+        self.logger.sys_log(f"[{country_name}] Phase1-E: 予算正規化 (B-01)")
+        normalized = self._run_phase1e_normalize(
+            country_name, policy,
+            invest_military=military_data["invest_military"],
+            invest_intelligence=military_data["invest_intelligence"],
+            invest_economy=domestic_action.invest_economy,
+            invest_welfare=domestic_action.invest_welfare,
+            invest_education_science=domestic_action.invest_education_science,
+        )
+
+        # マージ
+        try:
+            action = self._merge_all(
+                country_name, policy, major_dipl_dict,
+                diplomacy_list, military_data, domestic_action, normalized
+            )
+        except Exception as e:
+            self.logger.sys_log(f"[{country_name}] マージエラー: {e}", "ERROR")
+            traceback.print_exc()
+            action = self._create_fallback_action(country_name, country_state.tax_rate)
+
+        self.logger.sys_log(f"[{country_name}] ===== ターン完了 =====")
+        return action, analyst_reports
+
     def generate_actions(
         self, world_state: WorldState, past_news: List[str] = None
     ) -> Tuple[Dict[str, AgentAction], Dict[str, Dict[str, str]]]:
@@ -227,368 +923,13 @@ class AgentSystem:
                     country_name, current_tax_rate=country_state.tax_rate
                 )
                 all_analyst_reports[country_name] = {}
-
         return actions, all_analyst_reports
-
-    # -----------------------------------------------------------------
-    # 大臣最終決定制: パース・マージユーティリティ
-    # -----------------------------------------------------------------
-
-    @staticmethod
-    def _safe_json(text: str) -> dict:
-        """JSONテキストをパースし、失敗時は空辞書を返す"""
-        try:
-            t = text.strip()
-            if t.startswith("```json"): t = t[7:]
-            if t.startswith("```"): t = t[3:]
-            if t.endswith("```"): t = t[:-3]
-            return json.loads(t.strip())
-        except Exception:
-            return {}
-
-    @staticmethod
-    def _parse_foreign(raw: str) -> MinisterDecisionForeign:
-        d = AgentSystem._safe_json(raw)
-        policies_raw = d.get("diplomatic_policies", [])
-        # 大統領権限のフラグを安全に除去
-        STRIP = {"declare_war", "propose_alliance", "join_ally_defense",
-                 "propose_annexation", "accept_annexation",
-                 "propose_ceasefire", "accept_ceasefire",
-                 "demand_surrender", "accept_surrender"}
-        clean_policies = []
-        for p in policies_raw:
-            tc = p.get("target_country", "")
-            if not tc:
-                continue
-            for flag in STRIP:
-                p.pop(flag, None)
-            try:
-                clean_policies.append(DiplomaticAction(**p))
-            except Exception:
-                pass
-        return MinisterDecisionForeign(
-            thought_process=d.get("thought_process", "外務大臣提言なし"),
-            diplomatic_policies=clean_policies
-        )
-
-    @staticmethod
-    def _parse_defense(raw: str) -> MinisterDecisionDefense:
-        d = AgentSystem._safe_json(raw)
-        espionage = []
-        for e in d.get("espionage_decisions", []):
-            tc = e.get("target_country", "")
-            if not tc:
-                continue
-            try:
-                espionage.append(DiplomaticAction(
-                    target_country=tc,
-                    espionage_gather_intel=e.get("espionage_gather_intel", False),
-                    espionage_intel_strategy=e.get("espionage_intel_strategy"),
-                    reasoning_for_sabotage=e.get("reasoning_for_sabotage"),
-                    espionage_sabotage=e.get("espionage_sabotage", False),
-                    espionage_sabotage_strategy=e.get("espionage_sabotage_strategy"),
-                    reason=e.get("reason", "誵報")
-                ))
-            except Exception:
-                pass
-        return MinisterDecisionDefense(
-            thought_process=d.get("thought_process", "防衛大臣提言なし"),
-            reasoning_for_military_investment=d.get("reasoning_for_military_investment", ""),
-            request_invest_military=float(d.get("request_invest_military", 0.15)),
-            request_invest_intelligence=float(d.get("request_invest_intelligence", 0.05)),
-            war_commitment_ratios={k: float(v) for k, v in d.get("war_commitment_ratios", {}).items()},
-            espionage_decisions=espionage
-        )
-
-    @staticmethod
-    def _parse_economic(raw: str) -> MinisterDecisionEconomic:
-        d = AgentSystem._safe_json(raw)
-        return MinisterDecisionEconomic(
-            thought_process=d.get("thought_process", "経済大臣提言なし"),
-            target_press_freedom=float(d.get("target_press_freedom", 0.7)),
-            request_invest_economy=float(d.get("request_invest_economy", 0.35)),
-            request_invest_welfare=float(d.get("request_invest_welfare", 0.20)),
-            request_invest_education_science=float(d.get("request_invest_education_science", 0.05))
-        )
-
-    @staticmethod
-    def _parse_finance(raw: str) -> MinisterDecisionFinance:
-        d = AgentSystem._safe_json(raw)
-        return MinisterDecisionFinance(
-            thought_process=d.get("thought_process", "財務大臣提言なし"),
-            tax_rate=float(d.get("tax_rate", 0.30)),
-            target_tariff_rates={k: float(v) for k, v in d.get("target_tariff_rates", {}).items()}
-        )
-
-    @staticmethod
-    def _parse_president(raw: str) -> PresidentDecision:
-        d = AgentSystem._safe_json(raw)
-        major_actions = []
-        for ma in d.get("major_diplomatic_actions", []):
-            tc = ma.get("target_country", "")
-            if not tc:
-                continue
-            try:
-                major_actions.append(DiplomaticAction(
-                    target_country=tc,
-                    declare_war=ma.get("declare_war", False),
-                    propose_alliance=ma.get("propose_alliance", False),
-                    join_ally_defense=ma.get("join_ally_defense", False),
-                    defense_support_commitment=ma.get("defense_support_commitment"),
-                    propose_annexation=ma.get("propose_annexation", False),
-                    accept_annexation=ma.get("accept_annexation", False),
-                    propose_ceasefire=ma.get("propose_ceasefire", False),
-                    accept_ceasefire=ma.get("accept_ceasefire", False),
-                    demand_surrender=ma.get("demand_surrender", False),
-                    accept_surrender=ma.get("accept_surrender", False),
-                    reason=ma.get("reason", "大統領決定")
-                ))
-            except Exception:
-                pass
-        return PresidentDecision(
-            thought_process=d.get("thought_process", "大統領判断なし"),
-            sns_posts=d.get("sns_posts", []),
-            update_hidden_plans=d.get("update_hidden_plans", ""),
-            invest_military=float(d.get("invest_military", 0.15)),
-            invest_intelligence=float(d.get("invest_intelligence", 0.05)),
-            invest_economy=float(d.get("invest_economy", 0.35)),
-            invest_welfare=float(d.get("invest_welfare", 0.25)),
-            invest_education_science=float(d.get("invest_education_science", 0.05)),
-            dissolve_parliament=bool(d.get("dissolve_parliament", False)),
-            major_diplomatic_actions=major_actions,
-            # v1-2: 海峡封鎖権限
-            declare_strait_blockade=d.get("declare_strait_blockade") or None,
-            resolve_strait_blockade=d.get("resolve_strait_blockade") or None,
-        )
-
-    @staticmethod
-    def _merge_decisions(
-        foreign: MinisterDecisionForeign,
-        defense: MinisterDecisionDefense,
-        economic: MinisterDecisionEconomic,
-        finance: MinisterDecisionFinance,
-        president: PresidentDecision,
-    ) -> AgentAction:
-        """各大臣の決定 + 大統領の決定 → AgentActionに統合する"""
-        # target_country をキーにした辞書で管理
-        merged: Dict[str, DiplomaticAction] = {}
-
-        # 1. 外務大臣の外交定策を基盤に
-        for dp in foreign.diplomatic_policies:
-            merged[dp.target_country] = dp
-
-        # 2. 防衛大臣の誵報決定をマージ
-        for esp in defense.espionage_decisions:
-            tc = esp.target_country
-            if tc in merged:
-                existing = merged[tc]
-                existing.espionage_gather_intel     = esp.espionage_gather_intel
-                existing.espionage_intel_strategy   = esp.espionage_intel_strategy
-                existing.reasoning_for_sabotage     = esp.reasoning_for_sabotage
-                existing.espionage_sabotage         = esp.espionage_sabotage
-                existing.espionage_sabotage_strategy = esp.espionage_sabotage_strategy
-            else:
-                merged[tc] = esp
-
-        # 3. 防衛大臣の投入比率をマージ
-        for tc, ratio in defense.war_commitment_ratios.items():
-            if tc in merged:
-                merged[tc].war_commitment_ratio = ratio
-            else:
-                merged[tc] = DiplomaticAction(
-                    target_country=tc,
-                    war_commitment_ratio=ratio,
-                    reason="投入比率変更"
-                )
-
-        # 4. 大統領の重大外交事案をマージ
-        for ma in president.major_diplomatic_actions:
-            tc = ma.target_country
-            if tc in merged:
-                e = merged[tc]
-                if ma.declare_war:          e.declare_war          = True
-                if ma.propose_alliance:     e.propose_alliance     = True
-                if ma.join_ally_defense:
-                    e.join_ally_defense           = True
-                    e.defense_support_commitment  = ma.defense_support_commitment
-                if ma.propose_annexation:   e.propose_annexation   = True
-                if ma.accept_annexation:    e.accept_annexation    = True
-                if ma.propose_ceasefire:    e.propose_ceasefire    = True
-                if ma.accept_ceasefire:     e.accept_ceasefire     = True
-                if ma.demand_surrender:     e.demand_surrender     = True
-                if ma.accept_surrender:     e.accept_surrender     = True
-            else:
-                merged[tc] = ma
-
-        # 5. 予算合計のアサーション（設計上1.0以内のはずだが念のため）
-        total = (president.invest_military + president.invest_intelligence +
-                 president.invest_economy + president.invest_welfare +
-                 president.invest_education_science)
-        if total > 1.001:  # 浮動小数点許容
-            scale = 1.0 / total
-            president = president.model_copy(update={
-                "invest_military":         round(president.invest_military         * scale, 3),
-                "invest_intelligence":     round(president.invest_intelligence     * scale, 3),
-                "invest_economy":          round(president.invest_economy          * scale, 3),
-                "invest_welfare":          round(president.invest_welfare          * scale, 3),
-                "invest_education_science":round(president.invest_education_science* scale, 3),
-            })
-
-        return AgentAction(
-            thought_process=president.thought_process,
-            sns_posts=president.sns_posts,
-            update_hidden_plans=president.update_hidden_plans,
-            domestic_policy=DomesticAction(
-                tax_rate=finance.tax_rate,
-                target_press_freedom=economic.target_press_freedom,
-                invest_economy=president.invest_economy,
-                invest_military=president.invest_military,
-                invest_welfare=president.invest_welfare,
-                invest_intelligence=president.invest_intelligence,
-                invest_education_science=president.invest_education_science,
-                reasoning_for_military_investment=defense.reasoning_for_military_investment,
-                target_tariff_rates=finance.target_tariff_rates,
-                dissolve_parliament=president.dissolve_parliament,
-                reason="大臣決定+大統領調停"
-            ),
-            diplomatic_policies=list(merged.values())
-        )
-
-    def _decide_country_action(
-        self, country_name: str, country_state: CountryState,
-        world_state: WorldState, past_news: List[str] = None
-    ) -> Tuple[AgentAction, Dict[str, str]]:
-        """分析官→閣僚→大統領の3段階の意思決定を行い、(AgentAction, analyst_reports) で返す"""
-        
-        # フェーズ0: 分析官による各国分析 (gemini-2.5-flash-lite)
-        analyst_reports = {}
-        other_countries = [name for name in world_state.countries.keys() if name != country_name]
-        
-        if other_countries:
-            self.logger.sys_log(f"[{country_name}] フェーズ0: 分析官による各国分析を開始 ({len(other_countries)}カ国)")
-            for target_name in other_countries:
-                try:
-                    target_state = world_state.countries.get(target_name)
-
-                    # ===== 確率的諜報判定 =====
-                    # 自国諜報力 / (自国 + 相手国諜報力) の確率で真値取得に成功
-                    # 偽装がない国に対しては判定を行わない（処理コスト節約）
-                    import random
-                    has_deception = target_state is not None and any([
-                        target_state.reported_economy            is not None,
-                        target_state.reported_military           is not None,
-                        target_state.reported_approval_rating    is not None,
-                        target_state.reported_intelligence_level is not None,
-                        target_state.reported_gdp_per_capita     is not None,
-                    ])
-                    use_real_stats = False
-                    if has_deception and target_state is not None:
-                        my_intel     = max(1.0, country_state.intelligence_level)
-                        enemy_intel  = max(1.0, target_state.intelligence_level)
-                        success_prob = my_intel / (my_intel + enemy_intel)
-                        roll = random.random()
-                        use_real_stats = (roll < success_prob)
-                        result_str = "✅ 諜報成功（真値取得）" if use_real_stats else "❌ 諜報失敗（偽装値のまま）"
-                        self.logger.sys_log(
-                            f"[{country_name}→{target_name} 諜報判定] "
-                            f"自国:{my_intel:.1f} / 相手:{enemy_intel:.1f} "
-                            f"成功確率:{success_prob:.1%} | roll:{roll:.3f} → {result_str}"
-                        )
-                    # ===========================
-
-                    analyst_prompt = build_analyst_prompt(
-                        country_name, country_state, world_state,
-                        target_name, past_news,
-                        use_real_stats=use_real_stats
-                    )
-                    report = self._execute_agent(
-                        country_name, f"分析官(対{target_name})",
-                        analyst_prompt, "analyst",
-                        override_model="gemini-2.5-flash-lite"
-                    )
-                    analyst_reports[target_name] = report
-                    self.logger.sys_log_detail(f"{country_name} Analyst Report (vs {target_name})", report)
-                except Exception as exc:
-                    self.logger.sys_log(f"[{country_name}:分析官(対{target_name})] 推論中に例外発生: {exc}", "ERROR")
-                    analyst_reports[target_name] = "分析データなし（エラー）"
-            
-            self.logger.sys_log(f"[{country_name}] フェーズ0完了: {len(analyst_reports)}カ国の分析レポートを取得")
-        
-        # フェーズ1: 4大臣によるプロポーザルの逐次生成
-        # 外務・防衛大臣には分析官レポートを渡す（財務大臣は不要）
-        ar = analyst_reports if analyst_reports else None
-        foreign_prompt  = build_foreign_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=ar)
-        defense_prompt  = build_defense_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=ar)
-        economic_prompt = build_economic_minister_prompt(country_name, country_state, world_state, past_news)
-        finance_prompt  = build_finance_minister_prompt(country_name, country_state, world_state, past_news, analyst_reports=None)
-
-        minister_parsed = {}
-        minister_tasks = [
-            ("外務大臣",    foreign_prompt,  "actions_foreign",  "foreign",  self._parse_foreign),
-            ("防衛大臣",    defense_prompt,  "actions_defense",  "defense",  self._parse_defense),
-            ("経済内務大臣", economic_prompt, "actions_economic", "economic", self._parse_economic),
-            ("財務大臣",    finance_prompt,  "actions_finance",  "finance",  self._parse_finance),
-        ]
-        for role_name, prompt, category, key, parser_fn in minister_tasks:
-            try:
-                result = self._execute_agent(country_name, role_name, prompt, category, "gemini-2.5-flash")
-                self.logger.sys_log_detail(f"{country_name} Minister Proposal ({key})", result)
-                minister_parsed[key] = parser_fn(result)
-            except Exception as exc:
-                self.logger.sys_log(f"[{country_name}:{role_name}] 推論中に例外発生: {exc}", "ERROR")
-                minister_parsed[key] = parser_fn("{}")
-
-        foreign_dec  = minister_parsed["foreign"]
-        defense_dec  = minister_parsed["defense"]
-        economic_dec = minister_parsed["economic"]
-        finance_dec  = minister_parsed["finance"]
-
-        # フェーズ2: 大統領による最終決定 (gemini-2.5-pro)
-        # 大臣のthought_processと予算要求を集約して大統領に渡す
-        minister_summaries = {
-            "外務大臣": f"{foreign_dec.thought_process}",
-            "防衛大臣": f"{defense_dec.thought_process}",
-            "経済大臣": f"{economic_dec.thought_process}",
-            "財務大臣": f"{finance_dec.thought_process}",
-        }
-        budget_requests = {
-            "request_invest_military":          defense_dec.request_invest_military,
-            "request_invest_intelligence":      defense_dec.request_invest_intelligence,
-            "request_invest_economy":           economic_dec.request_invest_economy,
-            "request_invest_welfare":           economic_dec.request_invest_welfare,
-            "request_invest_education_science": economic_dec.request_invest_education_science,
-        }
-        president_prompt = build_president_prompt(
-            country_name,
-            country_state,
-            world_state,
-            minister_summaries=minister_summaries,
-            past_news=past_news,
-            budget_requests=budget_requests,
-        )
-
-        final_text = self._execute_agent(country_name, "大統領", president_prompt, "actions_president")
-        self.logger.sys_log_detail(f"{country_name} President Decision", final_text)
-
-        president_dec = self._parse_president(final_text)
-
-        # v1-2: 大統領の海峡封鎖決定をエンジンに格納（エンジンに _president_decisions 属性がある場合）
-        engine = getattr(self, "_engine_ref", None)
-        if engine is not None:
-            engine._president_decisions[country_name] = president_dec
-
-        # 全大臣決定をマージしてAgentActionを生成
-        try:
-            action = self._merge_decisions(foreign_dec, defense_dec, economic_dec, finance_dec, president_dec)
-            return action, analyst_reports
-        except Exception as e:
-            self.logger.sys_log(f"[{country_name}] マージエラー: {e}", "ERROR")
-            return self._create_fallback_action(country_name), analyst_reports
 
     def _create_fallback_action(self, country_name: str, current_tax_rate: float = 0.30) -> AgentAction:
         return AgentAction(
             thought_process="APIエラーのため前ターンの政策を継続する（現状維持）。",
             domestic_policy=DomesticAction(
+                tax_rate=current_tax_rate,
                 target_press_freedom=0.5,
                 invest_economy=0.50,
                 reasoning_for_military_investment="状況が不確実なため、基本的な軍備維持に留める。",
@@ -601,7 +942,10 @@ class AgentSystem:
             diplomatic_policies=[]
         )
 
-    # Delegation methods for modules
+    # =================================================================
+    # モジュール委譲メソッド（旧core.pyと同一インターフェース）
+    # =================================================================
+
     def run_summit(self, proposal, state_a, state_b, world_state, past_news=None) -> Tuple[str, str]:
         search_tool_a = self._create_search_tool(proposal.proposer, "首脳会談")
         search_tool_b = self._create_search_tool(proposal.target, "首脳会談")

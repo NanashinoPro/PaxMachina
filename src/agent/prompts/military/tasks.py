@@ -1,0 +1,114 @@
+from typing import Dict
+from models import WorldState, CountryState, PresidentPolicy
+from agent.prompts.base import build_common_context
+from agent.prompts.domestic import build_policy_section
+
+
+def build_military_invest_prompt(
+    country_name: str, country_state: CountryState, world_state: WorldState,
+    policy: PresidentPolicy, analyst_reports: Dict[str, str] = None, past_news=None
+) -> str:
+    """M-01: 軍事投資比率の決定（flash）"""
+    ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="軍事担当官（軍事投資）")
+    ar = ""
+    if analyst_reports:
+        ar = "\n---【分析官レポート（軍事バランス参照）】---\n"
+        for t, r in analyst_reports.items():
+            ar += f"▼ 対{t}:\n{r}\n\n"
+    return ctx + build_policy_section(policy) + ar + f"""
+現在の軍事力={country_state.military:.1f} / 経済力={country_state.economy:.1f}
+
+【リチャードソン・モデルに基づく算出プロセス】
+1. 相手側の脅威: 自国より強い敵がいるか？
+2. 経済的疲弊: 軍事投資は経済を圧迫するか？
+3. 動員限界(10%の壁): 軍事力が人口×10%を超えていないか？
+
+施政方針（{policy.stance}）に従い、reasoning_for_military_investmentで算出プロセスを説明した上で投資比率を決定してください。
+
+JSONのみ出力:
+{{"invest_military": 0.15, "reasoning_for_military_investment": "算出プロセスの説明"}}
+"""
+
+
+def build_intel_invest_prompt(
+    country_name: str, country_state: CountryState, world_state: WorldState,
+    policy: PresidentPolicy, past_news=None
+) -> str:
+    """M-02: 諜報投資比率の決定（flash-lite）"""
+    ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="諜報担当官（諜報投資）")
+    others_intel = {n: s.intelligence_level for n, s in world_state.countries.items() if n != country_name}
+    intel_str = ", ".join(f"{n}:{v:.1f}" for n, v in others_intel.items())
+    return ctx + build_policy_section(policy) + f"""
+自国諜報レベル={country_state.intelligence_level:.1f} / 他国: {intel_str}
+【ルール】諜報レベルが高いほど諜報成功率が向上。invest_intelligence(0.0〜1.0)で蓄積。
+
+JSONのみ出力:
+{{"invest_intelligence": 0.05, "reason": "理由（30文字以内）"}}
+"""
+
+
+def build_war_commitment_prompt(
+    country_name: str, country_state: CountryState, world_state: WorldState,
+    policy: PresidentPolicy, past_news=None
+) -> str:
+    """M-03: 前線投入比率の設定（flash）- 交戦中のみ呼び出す"""
+    ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="作戦担当官（前線投入）")
+    war_info = ""
+    for w in world_state.active_wars:
+        if w.aggressor == country_name:
+            war_info += f"  ⚔️ 対{w.defender}: 攻撃側 / 占領率{w.target_occupation_progress:.1f}% / 現投入率{w.aggressor_commitment_ratio:.0%}\n"
+        elif w.defender == country_name:
+            war_info += f"  🛡️ 対{w.aggressor}: 防衛側 / 被占領率{w.target_occupation_progress:.1f}% / 現投入率{w.defender_commitment_ratio:.0%}\n"
+    return ctx + build_policy_section(policy) + f"""
+【現在の交戦状況】
+{war_info}
+【ルール】war_commitment_ratio(0.1〜1.0): 高投入(0.7〜0.9)=短期決戦志向。低投入(0.1〜0.3)=持久戦・経済重視。
+1ターンの変動上限±10%。変更不要なら空の辞書を返してください。
+
+JSONのみ出力:
+{{"war_commitment_ratios": {{"相手国名": 0.8}}, "reason": "理由（30文字以内）"}}
+"""
+
+
+def build_espionage_gather_prompt(
+    country_name: str, country_state: CountryState, world_state: WorldState,
+    target_name: str, policy: PresidentPolicy,
+    analyst_report: str = "", past_news=None
+) -> str:
+    """M-04: 諜報収集の実施（flash-lite）- 対象国1つごとに呼び出す"""
+    target_state = world_state.countries.get(target_name)
+    rel = world_state.relations.get(country_name, {}).get(target_name, "neutral")
+    return build_policy_section(policy) + f"""
+あなたは「{country_name}」の諜報担当官です。対象国「{target_name}」への諜報収集を実施するか判断してください。
+
+自国諜報レベル={country_state.intelligence_level:.1f} / 対象国諜報レベル={getattr(target_state,'intelligence_level',0):.1f}
+二国間関係={rel} / 分析官レポート: {analyst_report[:200] if analyst_report else 'なし'}
+
+【ルール】espionage_gather_intel=trueで情報収集を実施。失敗リスクあり（相手の諜報力が高いほど失敗しやすい）。
+
+JSONのみ出力:
+{{"espionage_gather_intel": false, "espionage_intel_strategy": null, "reason": "理由（30文字以内）"}}
+"""
+
+
+def build_espionage_sabotage_prompt(
+    country_name: str, country_state: CountryState, world_state: WorldState,
+    target_name: str, policy: PresidentPolicy,
+    analyst_report: str = "", past_news=None
+) -> str:
+    """M-05: 破壊工作の実施（flash）- 対象国1つごとに呼び出す"""
+    target_state = world_state.countries.get(target_name)
+    rel = world_state.relations.get(country_name, {}).get(target_name, "neutral")
+    return build_policy_section(policy) + f"""
+あなたは「{country_name}」の工作担当官です。対象国「{target_name}」への破壊工作を実施するか判断してください。
+
+自国諜報レベル={country_state.intelligence_level:.1f} / 対象国諜報レベル={getattr(target_state,'intelligence_level',0):.1f}
+対象国軍事力={getattr(target_state,'military',0):.1f} / 二国間関係={rel}
+分析官レポート: {analyst_report[:200] if analyst_report else 'なし'}
+
+【ルール】espionage_sabotage=trueでインフラ・世論への破壊工作を実施。
+実行コスト・リスク・外交的リスクを考察してください（reasoning_for_sabotage）。
+
+JSONのみ出力:
+{{"espionage_sabotage": false, "espionage_sabotage_strategy": null, "reasoning_for_sabotage": "考察（工作する・しない理由）"}}
+"""
