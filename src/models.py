@@ -72,6 +72,43 @@ class CountryState(BaseModel):
     dependency_ratio: Dict[str, float] = Field(default_factory=dict, description="他国に対する経済的依存度（0.0-1.0）。60%を超えると属国化する")
     suzerain: Optional[str] = Field(None, description="属国化した場合の宗主国の国名（独自外交権を喪失する）")
 
+    # ==========================================================
+    # エネルギーシステム（v1-2追加）
+    # ==========================================================
+    energy_self_sufficiency: float = Field(
+        0.13, ge=0.0, le=1.0,
+        description="エネルギー自給率(0-1)。国内生産で賄える割合。産油国は0.9以上、輸入大国は0.1前後。"
+    )
+    energy_import_sources: Dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "エネルギー輸入元と割合の辞書。"
+            "キーが国名(シミュ内)→ 戦争中/制裁で自動遮断。"
+            "キーが '__中東'/'__その他' 等 (__始まり)→ 海峡封鎖で遮断。"
+            "全値合計 = 1.0 - energy_self_sufficiency になるよう設定。"
+            "起動時に data/energy_import_sources.json から読み込まれる。"
+        )
+    )
+    energy_reserve_turns: float = Field(
+        1.0, ge=0.0,
+        description=(
+            "エネルギー備蓄残量（ターン単位）。"
+            "封鎖時は毎ターン net_deficit 分消費。"
+            "供給正常時は次ターン頭に energy_reserve_target_turns へ即時リセット。"
+        )
+    )
+    energy_reserve_target_turns: float = Field(
+        1.0, ge=0.0,
+        description="各国の目標備蓄量（ターン単位）。供給再開後のリセット先。initial_stats.csvで設定。"
+    )
+    energy_export_blocked: bool = Field(
+        False,
+        description=(
+            "この国のエネルギー輸出が封鎖中かどうか。"
+            "海峡封鎖発動時に産油国（イラン・サウジ）をTrue、解除時にFalseへ変更される。"
+        )
+    )
+
 # ---------------------------------------------------------
 # アクション定義（AIが出力するJSON構造）
 # ---------------------------------------------------------
@@ -222,6 +259,52 @@ class PresidentDecision(BaseModel):
         default_factory=list,
         description="大統領権限の外交決定リスト（declare_war, propose_alliance, join_ally_defense, propose_annexation, accept_annexation, propose_ceasefire, accept_ceasefire, demand_surrender, accept_surrender のみ）"
     )
+    # ==================================================
+    # 海峡封鎖権限（v1-2追加。大統領のみが宣言・解除できる）
+    # ==================================================
+    declare_strait_blockade: Optional[str] = Field(
+        None,
+        description=(
+            "宣言する海峡封鎖の名称。例: 'ホルムズ海峡'。"
+            "【実行可能な国のみ】イラン（ホルムズ海峡に面しており軍事封鎖が現実的）、"
+            "アメリカ（第5艦隊による海軍封鎖）、サウジアラビア（自国輸出停止による実質封鎖）。"
+            "Noneなら封鎖宣言なし。"
+        )
+    )
+    resolve_strait_blockade: Optional[str] = Field(
+        None,
+        description=(
+            "解除する海峡封鎖の名称。例: 'ホルムズ海峡'。"
+            "封鎖を宣言した国のみが解除できる。"
+            "Noneなら解除アクションなし。"
+        )
+    )
+
+# ---------------------------------------------------------
+# タスクエージェント制（v2.0）: 大統領施政方針モデル
+# ---------------------------------------------------------
+
+class PresidentPolicy(BaseModel):
+    """
+    P-01: 大統領施政方針（Phase0でProモデルが生成）
+    各タスクエージェント（flash/flash-lite）がこれを参照して意思決定を行う。
+    """
+    stance: str = Field(
+        ...,
+        description="全体的な外交・内政スタンス（例: '拡張型', '防御型', '外交優先型', '経済優先型'）"
+    )
+    directives: List[str] = Field(
+        default_factory=list,
+        description="各タスクエージェントへの具体的な優先指示リスト（3〜5項目）"
+    )
+    hidden_plans: str = Field(
+        "",
+        description="非公開の戦略メモ（他国には見せない内部方針）。hidden_plansフィールドの更新に使用。"
+    )
+    sns_posts: List[str] = Field(
+        default_factory=list,
+        description="大統領/首相名義のSNS投稿（0〜2件・各100文字以内）"
+    )
 
 # ---------------------------------------------------------
 # 世界（World）の状態定義
@@ -341,3 +424,18 @@ class WorldState(BaseModel):
     news_events: List[str] = Field(default_factory=list, description="前ターンに世界で起きた公開イベント（ニュース）")
     sns_logs: Dict[str, List[dict]] = Field(default_factory=dict, description="各国のSNS投稿とその感情スコア、検閲結果、および投稿者（Leader/Citizen/Espionage）の履歴")
     summit_logs: List[dict] = Field(default_factory=list, description="過去の首脳会談の議事録リスト。{'turn': int, 'participants': [str, str], 'log': str, 'summary': str, 'is_private': bool} 形式など")
+
+    # ==================================================
+    # エネルギーシステム（v1-2追加）
+    # ==================================================
+    active_strait_blockades: List[str] = Field(
+        default_factory=list,
+        description=(
+            "現在封鎖中の海峡名リスト。例: ['ホルムズ海峡']。"
+            "封鎖宣言国とその海峡名を記録する辞書形式も将来的に検討。"
+        )
+    )
+    strait_blockade_owners: Dict[str, str] = Field(
+        default_factory=dict,
+        description="封鎖中の海峡と宣言した国のマッピング。{'ホルムズ海峡': 'イラン'} のような形式。解除権限の確認に使用。"
+    )
