@@ -57,6 +57,11 @@ def build_foreign_minister_prompt(country_name: str, country_state: CountryState
 - ⚠️ 累積援助比率が60%を超えると相手が属国化するリスクあり。
 - ⚠️ 1ターンでGDPの20%超の援助はオランダ病を引き起こします。
 
+【援助の受入制御（aid_acceptance_ratio）】
+他国から受け取っている援助の受入率を毎ターン調整できます（0.0〜1.0）。
+自国の `dependency_ratio` を確認し、属国化リスク（60%超）が高まっている場合は受入率を引き下げてください。
+政治的シグナルや自立戦略として全拒否（0.0）も選択できます。
+
 【非公開外交チャネル（is_private）】
 `is_private: true` で第三国に秘密の外交を行えます。
 """
