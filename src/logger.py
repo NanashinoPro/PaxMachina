@@ -129,44 +129,96 @@ class SimulationLogger:
         self.console.print(table)
         
     def display_agent_thoughts(self, country_name: str, action: AgentAction):
-        """(非公開)エージェントの思考ログを表示"""
-        
+        """(非公開)エージェントの思考ログを表示（コンパクト版）"""
         text = Text()
-        text.append(f"思考: ", style="bold magenta")
-        text.append(f"{action.thought_process}\n")
-        
-        text.append(f"内政: ", style="bold green")
+
+        # 思考（先頭120文字のみ）
+        thought = action.thought_process or ""
+        thought_preview = (thought[:120] + "…") if len(thought) > 120 else thought
+        text.append("💭 ", style="bold magenta")
+        text.append(f"{thought_preview}\n", style="dim white")
+
+        # 内政（1行）
         dpol = action.domestic_policy
-        # 首脳AIが 15.0(%) のように整数で返してきた場合の補正ロジック
-        new_tax_rate = action.domestic_policy.tax_rate
+        new_tax_rate = dpol.tax_rate
         if new_tax_rate >= 1.0:
             new_tax_rate /= 100.0
-        text.append(f"税率 {new_tax_rate:.1%} | 経済 {dpol.invest_economy:.0%} | 軍事 {dpol.invest_military:.0%} | 福祉 {dpol.invest_welfare:.0%} | 教育・科学 {dpol.invest_education_science:.0%} | 諜報 {dpol.invest_intelligence:.0%}\n")
-        text.append(f"内政理由: ", style="bold yellow")
-        text.append(f"{dpol.reason}\n")
-        
-        if action.diplomatic_policies:
-            text.append(f"外交: ", style="bold blue")
-            for dip in action.diplomatic_policies:
-                aid_str = ""
-                aid_econ = getattr(dip, 'aid_amount_economy', 0.0)
-                aid_mil = getattr(dip, 'aid_amount_military', 0.0)
-                if aid_econ > 0 or aid_mil > 0:
-                    aid_str = f" [援助 経:{aid_econ:.1f}/軍:{aid_mil:.1f}]"
-                text.append(f"\n  → {dip.target_country}{aid_str}: {dip.reason}")
-            text.append("\n")
+        text.append("🏛 ", style="bold green")
+        text.append(
+            f"税{new_tax_rate:.0%} | "
+            f"経{dpol.invest_economy:.0%} 軍{dpol.invest_military:.0%} "
+            f"福{dpol.invest_welfare:.0%} 教{dpol.invest_education_science:.0%} 諜{dpol.invest_intelligence:.0%}\n"
+        )
 
-        if action.update_hidden_plans:
-            text.append(f"秘匿計画: ", style="bold red")
-            text.append(f"{action.update_hidden_plans}\n")
-            
+        # 外交（対象国のみリスト）
+        if action.diplomatic_policies:
+            targets = []
+            for dip in action.diplomatic_policies:
+                aid_econ = getattr(dip, 'aid_amount_economy', 0.0) or 0.0
+                aid_mil  = getattr(dip, 'aid_amount_military', 0.0) or 0.0
+                tag = f"[援助 経:{aid_econ:.0f}/軍:{aid_mil:.0f}]" if (aid_econ > 0 or aid_mil > 0) else ""
+                targets.append(f"{dip.target_country}{tag}")
+            text.append("🌐 ", style="bold blue")
+            text.append(", ".join(targets) + "\n")
+
+        # SNS（1件・60文字）
         if action.sns_posts:
-            text.append(f"SNS投稿: ", style="bold cyan")
-            for post in action.sns_posts:
-                text.append(f"\n  \"{post}\"")
-            text.append("\n")
-        
-        self.console.print(Panel(text, title=f"🧠 {country_name} 首脳の脳内", border_style="magenta"))
+            post = (action.sns_posts[0] or "").strip()
+            post_preview = (post[:60] + "…") if len(post) > 60 else post
+            if post_preview:
+                text.append("📢 ", style="bold cyan")
+                text.append(f'"{post_preview}"\n', style="italic")
+
+        self.console.print(Panel(
+            text,
+            title=f"[bold magenta]🧠 {country_name}[/]",
+            border_style="magenta",
+            padding=(0, 1),
+        ))
+
+    def display_turn_summary(self, world_before: dict, world_after: "WorldState"):
+        """ターン終了時に各国の変化量をサマリーテーブルで表示"""
+        from rich.table import Table as RTable
+        table = RTable(title="📊 ターンサマリー（変化量）", show_lines=False, box=None)
+        table.add_column("国",   style="cyan",   no_wrap=True)
+        table.add_column("経済力", justify="right")
+        table.add_column("軍事力", justify="right")
+        table.add_column("支持率", justify="right")
+        table.add_column("諜報力", justify="right")
+        table.add_column("エネルギー備蓄", justify="right")
+
+        for name, c in world_after.countries.items():
+            before = world_before.get(name, {})
+
+            def delta_str(current: float, prev: float, unit: str = "") -> str:
+                diff = current - prev
+                color = "green" if diff > 0 else ("red" if diff < 0 else "dim")
+                sign = "+" if diff >= 0 else ""
+                return f"[{color}]{current:.1f}({sign}{diff:.1f}{unit})[/{color}]"
+
+            reserve = getattr(c, 'energy_reserve', None)
+            target  = getattr(c, 'energy_reserve_target_turns', None)
+            reserve_str = "—"
+            if reserve is not None:
+                prev_r = before.get('energy_reserve', reserve)
+                diff_r = reserve - prev_r
+                color  = "green" if diff_r >= 0 else "red"
+                sign   = "+" if diff_r >= 0 else ""
+                tgt    = f"/{target:.1f}T" if target else ""
+                reserve_str = f"[{color}]{reserve:.1f}{tgt}({sign}{diff_r:.1f})[/{color}]"
+
+            table.add_row(
+                name,
+                delta_str(c.economy,            before.get('economy',            c.economy)),
+                delta_str(c.military,           before.get('military',           c.military)),
+                delta_str(c.approval_rating,    before.get('approval_rating',    c.approval_rating), "%"),
+                delta_str(c.intelligence_level, before.get('intelligence_level', c.intelligence_level)),
+                reserve_str,
+            )
+        self.console.print(table)
+        self.console.print()
+
+
 
     def display_world_events(self, world: WorldState, title: str = "📰 ニュース・イベントログ"):
         """世界で起こったニュース(公開イベント)を表示"""

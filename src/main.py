@@ -372,11 +372,23 @@ def main():
         # 1. ターン開始時のシステム内政判定（選挙・クーデター）
         engine.process_pre_turn()
         
+        # ターン開始前の各国データをスナップショット保存（サマリー差分計算用）
+        _country_snapshot = {
+            name: {
+                "economy":            c.economy,
+                "military":           c.military,
+                "approval_rating":    c.approval_rating,
+                "intelligence_level": c.intelligence_level,
+                "energy_reserve":     getattr(c, 'energy_reserve', None),
+            }
+            for name, c in world_state.countries.items()
+        }
+
         # 2. 国家ステータス
         logger.display_turn_header(world_state)
         logger.display_section_header("1. 国家ステータス")
         logger.display_country_status(world_state)
-        
+
         # 3. ニュース・イベントログ (前期の結果 + 今期開始時の事象)
         logger.display_section_header("2. ニュース・イベントログ")
         logger.display_world_events(world_state)
@@ -419,8 +431,10 @@ def main():
             total_revenue = tax_revenue + country.tariff_revenue
             country.government_budget = max(0.0, total_revenue - interest_payment)
 
-        print("\n⏳ 首脳AIが状況を分析し、行動を決定しています...")
+        n_countries = len(world_state.countries)
+        logger.console.print(f"\n[bold yellow]⏳ {n_countries}カ国の首脳AIが戦略を立案中... しばらくお待ちください[/bold yellow]\n")
         actions, all_analyst_reports, all_task_logs = agent_system.generate_actions(world_state, past_news=past_news_queue)
+        logger.console.print(f"[bold green]✅ 全国家の行動決定が完了しました[/bold green]\n")
         
         # 6. 各国の意思決定
         logger.display_section_header("3. 各国の意思決定")
@@ -558,12 +572,17 @@ def main():
         else:
             print("今期、首脳会談は行われませんでした。")
                     
-        # 9. ニュースの表示
-        logger.display_section_header("9. ニュースの表示")
-        print("🗞️ 各国メディアがニュースを分析中...")
+        # 9. メディア報道のみ表示（外交イベントはセクション5で表示済み）
+        logger.display_section_header("9. メディア報道")
+        logger.console.print("[dim]🗞️ 各国メディアがニュースを分析中...[/dim]")
         media_reports, media_modifiers = agent_system.generate_media_reports(world_state, actions, recent_summit_logs)
         world_state.news_events.extend(media_reports)
-        logger.display_world_events(world_state, title="📰 本日のハイライト・メディア報道")
+        # メディア報告のみ（🗞️ で始まる行）を抽出して表示
+        media_only = [e for e in media_reports if e.strip().startswith("🗞️")]
+        if media_only:
+            logger.display_category_events(media_only, "📰 各国メディア報道", style="bold white", icon="🗞️")
+        else:
+            logger.console.print("[dim]今期、メディア報告はありません。[/dim]")
 
         # 10. SNSタイムライン
         logger.display_section_header("10. SNSタイムライン")
@@ -627,8 +646,11 @@ def main():
             
         engine.advance_time()
         
-        # ターン進行のウェイト
-        print("\n" + "="*50 + "\n")
+        # ターンサマリー（変化量テーブル）
+        logger.display_section_header("📊 ターンサマリー")
+        logger.display_turn_summary(_country_snapshot, world_state)
+
+        logger.console.print("\n" + "═" * 70 + "\n")
         time.sleep(3)
 
     print("🏁 指定ターン数のシミュレーションが終了しました。")
