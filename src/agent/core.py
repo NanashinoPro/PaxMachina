@@ -522,7 +522,7 @@ class AgentSystem:
                 "mil_invest", "gemini-2.5-flash")
             d = self._safe_json(raw)
             result["invest_military"] = float(d.get("invest_military", 0.15))
-            result["reasoning_for_military_investment"] = d.get("reasoning_for_military_investment", "")
+            result["reasoning_for_military_investment"] = d.get("reasoning_for_military_investment") or ""
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:M-01] エラー: {e}", "ERROR")
 
@@ -680,7 +680,8 @@ class AgentSystem:
             report_approval_rating = d.get("report_approval_rating")
             report_intelligence_level = d.get("report_intelligence_level")
             report_gdp_per_capita = d.get("report_gdp_per_capita")
-            deception_reason = d.get("deception_reason", "")
+            # LLMが null を返した場合 None になるので空文字列にフォールバック
+            deception_reason = d.get("deception_reason") or ""
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:I-07] エラー: {e}", "ERROR")
 
@@ -707,7 +708,7 @@ class AgentSystem:
             report_approval_rating=report_approval_rating,
             report_intelligence_level=report_intelligence_level,
             report_gdp_per_capita=report_gdp_per_capita,
-            deception_reason=deception_reason,
+            deception_reason=deception_reason or "",  # None安全
             dissolve_parliament=dissolve_parliament,
             invest_military=0.15,        # 後でPhase1-Eで上書きされる
             invest_intelligence=0.05,    # 後でPhase1-Eで上書きされる
@@ -787,7 +788,7 @@ class AgentSystem:
             "invest_economy":           normalized["invest_economy"],
             "invest_welfare":           normalized["invest_welfare"],
             "invest_education_science": normalized["invest_education_science"],
-            "reasoning_for_military_investment": military_data.get("reasoning_for_military_investment", ""),
+            "reasoning_for_military_investment": military_data.get("reasoning_for_military_investment") or "",
         })
 
         # --- 外交リストにmilitary_dataの諜報アクションをマージ ---
