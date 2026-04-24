@@ -25,8 +25,8 @@ def build_military_invest_prompt(
 
 施政方針（{policy.stance}）に従い、reasoning_for_military_investmentで算出プロセスを説明した上で投資比率を決定してください。
 
-JSONのみ出力:
-{{"invest_military": 0.15, "reasoning_for_military_investment": "算出プロセスの説明"}}
+JSONのみ出力（コードブロック不要、数値は自分で判断すること）:
+{{"invest_military": ???, "reasoning_for_military_investment": "算出プロセスの説明"}}
 """
 
 
@@ -42,8 +42,8 @@ def build_intel_invest_prompt(
 自国諜報レベル={country_state.intelligence_level:.1f} / 他国: {intel_str}
 【ルール】諜報レベルが高いほど諜報成功率が向上。invest_intelligence(0.0〜1.0)で蓄積。
 
-JSONのみ出力:
-{{"invest_intelligence": 0.05, "reason": "理由（30文字以内）"}}
+JSONのみ出力（コードブロック不要、数値は自分で判断すること）:
+{{"invest_intelligence": ???, "reason": "理由（30文字以内）"}}
 """
 
 
@@ -65,8 +65,8 @@ def build_war_commitment_prompt(
 【ルール】war_commitment_ratio(0.1〜1.0): 高投入(0.7〜0.9)=短期決戦志向。低投入(0.1〜0.3)=持久戦・経済重視。
 1ターンの変動上限±10%。変更不要なら空の辞書を返してください。
 
-JSONのみ出力:
-{{"war_commitment_ratios": {{"相手国名": 0.8}}, "reason": "理由（30文字以内）"}}
+JSONのみ出力（コードブロック不要、war_commitment_ratiosの値は0.1〜1.0で自分で判断すること）:
+{{"war_commitment_ratios": {{"<相手国名>": ???}}, "reason": "理由（30文字以内）"}}
 """
 
 
