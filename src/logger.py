@@ -220,20 +220,33 @@ class SimulationLogger:
                 
             self.console.print(Panel(text, title=f"📱 {country} SNS Timeline", border_style="cyan"))
 
-    def save_turn_log(self, world: WorldState, actions: dict, analyst_reports: dict = None):
+    def save_turn_log(self, world: WorldState, actions: dict, analyst_reports: dict = None, task_logs: dict = None):
         """ターン終了時の全状態と行動履歴をJSONファイルに追記保存"""
         filename = self.sim_log_file
-        
+
+        # task_logs: {国名: {タスク名: raw_LLM_response}} をJSONパース済みに変換
+        parsed_task_logs = {}
+        for country, tasks in (task_logs or {}).items():
+            parsed_task_logs[country] = {}
+            for task_role, raw_text in tasks.items():
+                try:
+                    parsed_task_logs[country][task_role] = json.loads(raw_text)
+                except (json.JSONDecodeError, TypeError):
+                    # JSONでなければ文字列のまま保存
+                    parsed_task_logs[country][task_role] = raw_text
+
         log_entry = {
             "turn": world.turn,
             "year": world.year,
             "quarter": world.quarter,
             "world_state": world.model_dump(),
             "actions": {k: v.model_dump() for k, v in actions.items()},
-            "analyst_reports": analyst_reports or {}
+            "analyst_reports": analyst_reports or {},
+            "task_logs": parsed_task_logs,
         }
-        
+
         with open(filename, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
+

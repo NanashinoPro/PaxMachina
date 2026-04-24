@@ -220,10 +220,23 @@ class AgentSystem:
 
             elapsed = time.time() - start_time
             self.logger.sys_log(f"[{country_name}:{role}] レスポンス受信完了 (所要時間: {elapsed:.2f}秒)")
-            return response_text.strip()
+            response_text = response_text.strip()
+
+            # --- タスクログバッファに自動収集 ---
+            if not hasattr(self, '_task_log_buffer'):
+                self._task_log_buffer: Dict[str, Dict[str, str]] = {}
+            buf = self._task_log_buffer.setdefault(country_name, {})
+            # ロール名をキー、raw JSONテキストを値として保存
+            buf[role] = response_text
+
+            return response_text
 
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:{role}] APIエラー発生: {e}", "ERROR")
+            # エラー時もバッファに記録
+            if not hasattr(self, '_task_log_buffer'):
+                self._task_log_buffer: Dict[str, Dict[str, str]] = {}
+            self._task_log_buffer.setdefault(country_name, {})[role] = f"ERROR: {e}"
             return "{}"
 
     @staticmethod
@@ -901,21 +914,28 @@ class AgentSystem:
             action = self._create_fallback_action(country_name, country_state.tax_rate)
 
         self.logger.sys_log(f"[{country_name}] ===== ターン完了 =====")
-        return action, analyst_reports
+        # タスクログをバッファから取得して返す
+        task_logs = dict(self._task_log_buffer.get(country_name, {}))
+        return action, analyst_reports, task_logs
 
     def generate_actions(
         self, world_state: WorldState, past_news: List[str] = None
-    ) -> Tuple[Dict[str, AgentAction], Dict[str, Dict[str, str]]]:
-        """全国家の行動を生成し、(actions, all_analyst_reports) のタプルで返す"""
+    ) -> Tuple[Dict[str, AgentAction], Dict[str, Dict[str, str]], Dict[str, Dict[str, str]]]:
+        """全国家の行動を生成し、(actions, all_analyst_reports, all_task_logs) のタプルで返す"""
+        # ターン開始時にバッファをリセット
+        self._task_log_buffer: Dict[str, Dict[str, str]] = {}
+
         actions: Dict[str, AgentAction] = {}
         all_analyst_reports: Dict[str, Dict[str, str]] = {}
+        all_task_logs: Dict[str, Dict[str, str]] = {}
         for country_name, country_state in world_state.countries.items():
             try:
-                action, analyst_reports = self._decide_country_action(
+                action, analyst_reports, task_logs = self._decide_country_action(
                     country_name, country_state, world_state, past_news
                 )
                 actions[country_name] = action
                 all_analyst_reports[country_name] = analyst_reports
+                all_task_logs[country_name] = task_logs
             except Exception as e:
                 self.logger.sys_log(f"⚠️ {country_name}の推論中にエラーが発生しました: {e}", "ERROR")
                 traceback.print_exc()
@@ -923,7 +943,8 @@ class AgentSystem:
                     country_name, current_tax_rate=country_state.tax_rate
                 )
                 all_analyst_reports[country_name] = {}
-        return actions, all_analyst_reports
+                all_task_logs[country_name] = {}
+        return actions, all_analyst_reports, all_task_logs
 
     def _create_fallback_action(self, country_name: str, current_tax_rate: float = 0.30) -> AgentAction:
         return AgentAction(
