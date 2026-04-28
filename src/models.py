@@ -109,6 +109,45 @@ class CountryState(BaseModel):
         )
     )
 
+    # ==========================================================
+    # 核兵器システム（v1-3追加）
+    # ==========================================================
+    nuclear_warheads: int = Field(
+        0, ge=0,
+        description="核弾頭保有数。Step4（核保有国）到達後に量産可能。"
+    )
+    nuclear_dev_step: int = Field(
+        0, ge=0, le=4,
+        description=(
+            "核開発段階。0:未着手, 1:ウラン濃縮/プルトニウム生産, "
+            "2:核実験, 3:実戦配備, 4:核保有国（量産フェーズ）"
+        )
+    )
+    nuclear_dev_invested: float = Field(
+        0.0, ge=0.0,
+        description="現在の開発段階への累積投資額"
+    )
+    nuclear_dev_target: float = Field(
+        0.0, ge=0.0,
+        description="現在の開発段階の目標投資額（economy × gdp_ratio × turns で自動算出）"
+    )
+    has_second_strike: bool = Field(
+        False,
+        description="第二撃能力の有無（SSBN/ICBM分散配備）。核保有国の中でも高度な能力。"
+    )
+    nuclear_host_provider: Optional[str] = Field(
+        None,
+        description=(
+            "自国領土に核兵器を物理的に配備している外国の国名。"
+            "例: NATOの核共有でドイツに米国核が配備されている場合 'アメリカ'。"
+            "日本は非核三原則により初期値None。"
+        )
+    )
+    nuclear_hosted_warheads: int = Field(
+        0, ge=0,
+        description="自国領土に配備されている他国の核弾頭数"
+    )
+
 # ---------------------------------------------------------
 # アクション定義（AIが出力するJSON構造）
 # ---------------------------------------------------------
@@ -219,6 +258,11 @@ class MinisterDecisionDefense(BaseModel):
     reasoning_for_military_investment: str = Field(..., description="リチャードソン・モデルに基づく軍事投資の算出プロセス")
     request_invest_military: float = Field(..., ge=0.0, le=1.0, description="軍事投資の予算要求（大統領が調停）")
     request_invest_intelligence: float = Field(0.0, ge=0.0, le=1.0, description="諜報投資の予算要求（大統領が調停）")
+    request_invest_nuclear: float = Field(0.0, ge=0.0, le=1.0, description="核開発投資の予算要求（大統領が調停）。核保有国(step4)では量産費に充当。")
+    nuclear_use_recommendation: Optional[str] = Field(
+        None,
+        description="核使用の提言（大統領への助言）。'tactical:対象国名' or 'strategic:対象国名' or None"
+    )
     war_commitment_ratios: Dict[str, float] = Field(
         default_factory=dict,
         description="交戦中の各相手国への軍事力投入比率（最終決定）。{相手国名: 0.1〜1.0}"
@@ -278,6 +322,44 @@ class PresidentDecision(BaseModel):
             "封鎖を宣言した国のみが解除できる。"
             "Noneなら解除アクションなし。"
         )
+    )
+    # ==================================================
+    # 核兵器権限（v1-3追加。大統領のみが核使用・核配備を決定できる）
+    # ==================================================
+    launch_tactical_nuclear: Optional[str] = Field(
+        None,
+        description=(
+            "戦術核使用の対象国名。交戦中の敵国のみ指定可能。"
+            "前線投入中の敵軍事力に対して大ダメージを与える。弾頭1発消費。"
+            "Noneなら戦術核使用なし。"
+        )
+    )
+    launch_strategic_nuclear: Optional[str] = Field(
+        None,
+        description=(
+            "戦略核使用の対象国名。交戦中の敵国のみ指定可能。"
+            "敵の経済・人口・軍事力全体に壊滅的ダメージ。弾頭5発消費。"
+            "Noneなら戦略核使用なし。"
+        )
+    )
+    strategic_nuclear_count: int = Field(
+        5, ge=1,
+        description="戦略核使用時の弾頭投入数。デフォルト5発。"
+    )
+    deploy_nuclear_to_ally: Optional[str] = Field(
+        None,
+        description=(
+            "自国の核兵器を同盟国の領土に配備する対象国名。"
+            "同盟関係(alliance)が前提。Noneなら配備アクションなし。"
+        )
+    )
+    deploy_nuclear_count: int = Field(
+        0, ge=0,
+        description="同盟国に配備する核弾頭数"
+    )
+    remove_hosted_nuclear: bool = Field(
+        False,
+        description="自国領土に配備されている他国の核兵器を撤去する。Trueで撤去実行。"
     )
 
 # ---------------------------------------------------------

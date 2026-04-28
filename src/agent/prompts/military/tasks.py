@@ -8,14 +8,23 @@ def build_military_invest_prompt(
     country_name: str, country_state: CountryState, world_state: WorldState,
     policy: PresidentPolicy, analyst_reports: Dict[str, str] = None, past_news=None
 ) -> str:
-    """M-01: 軍事投資比率の決定（flash）"""
-    ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="軍事担当官（軍事投資）")
+    """M-01: 軍事投資比率の決定 + 核開発投資（flash）"""
+    ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="軍事担当官（軍事投資・核戦略）")
     ar = ""
     if analyst_reports:
         ar = "\n---【分析官レポート（軍事バランス参照）】---\n"
         for t, r in analyst_reports.items():
             ar += f"▼ 対{t}:\n{r}\n\n"
-    return ctx + build_policy_section(policy) + ar + f"""
+
+    # 核情報
+    step_names = {0: "未着手", 1: "ウラン濃縮中", 2: "核実験段階", 3: "実戦配備中", 4: "核保有国"}
+    nuke_step = step_names.get(country_state.nuclear_dev_step, "不明")
+    nuke_section = f"\n【☢️ 核開発状況】\n核弾頭: {country_state.nuclear_warheads}発 / 開発段階: {nuke_step}\n"
+    if country_state.nuclear_dev_step in (1, 2, 3):
+        progress = (country_state.nuclear_dev_invested / max(1.0, country_state.nuclear_dev_target)) * 100
+        nuke_section += f"開発進捗: {country_state.nuclear_dev_invested:.1f}/{country_state.nuclear_dev_target:.1f} ({progress:.0f}%)\n"
+
+    return ctx + build_policy_section(policy) + ar + nuke_section + f"""
 現在の軍事力={country_state.military:.1f} / 経済力={country_state.economy:.1f}
 
 【リチャードソン・モデルに基づく算出プロセス】
@@ -23,10 +32,19 @@ def build_military_invest_prompt(
 2. 経済的疲弊: 軍事投資は経済を圧迫するか？
 3. 動員限界(10%の壁): 軍事力が人口×10%を超えていないか？
 
+【☢️ 核開発投資（invest_nuclear）の決定ルール】
+- 核開発は4段階（1:ウラン濃縮→2:核実験→3:実戦配備→4:核保有国）で進行。
+- 0.0の場合、核開発に予算を割かない。Step4到達後は弾頭量産に充当。
+- 大きな経済負担を伴うため、戦略的必要性を十分に検討すること。
+
+【☢️ 核使用の提言（nuclear_use_recommendation）】
+- 交戦中の場合のみ。大統領への助言として核使用を提言可能。
+- 形式: "tactical:対象国名" or "strategic:対象国名" or null
+
 施政方針（{policy.stance}）に従い、reasoning_for_military_investmentで算出プロセスを説明した上で投資比率を決定してください。
 
 JSONのみ出力（コードブロック不要、数値は自分で判断すること）:
-{{"invest_military": ???, "reasoning_for_military_investment": "算出プロセスの説明"}}
+{{"invest_military": ???, "invest_nuclear": ???, "nuclear_use_recommendation": null, "reasoning_for_military_investment": "算出プロセスの説明"}}
 """
 
 

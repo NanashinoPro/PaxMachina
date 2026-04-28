@@ -511,6 +511,7 @@ class AgentSystem:
             "invest_military": 0.15,
             "reasoning_for_military_investment": "デフォルト",
             "invest_intelligence": 0.05,
+            "invest_nuclear": 0.0,  # v1-3: 核開発投資
             "war_commitment_ratios": {},
             "espionage_actions": [],  # List[dict] {target, gather, gather_strategy, sabotage, sabotage_strategy, sabotage_reasoning}
         }
@@ -523,6 +524,11 @@ class AgentSystem:
             d = self._safe_json(raw)
             result["invest_military"] = float(d.get("invest_military", 0.15))
             result["reasoning_for_military_investment"] = d.get("reasoning_for_military_investment") or ""
+            # v1-3: 核開発投資と核使用提言
+            result["invest_nuclear"] = float(d.get("invest_nuclear", 0.0))
+            nuke_rec = d.get("nuclear_use_recommendation")
+            if nuke_rec:
+                self.logger.sys_log(f"[{country_name}:M-01] 核使用提言: {nuke_rec}")
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:M-01] エラー: {e}", "ERROR")
 
@@ -848,6 +854,48 @@ class AgentSystem:
             merged[strait_key] = DiplomaticAction(
                 target_country=strait_key,
                 reason=f"海峡封鎖解除: {resolve_blockade}"
+            )
+
+        # --- v1-3: 核兵器フラグを仮想DiplomaticActionに変換（engine/nuclear.pyで解釈） ---
+        launch_tactical = major_dipl_dict.get("launch_tactical_nuclear")
+        if launch_tactical:
+            nuke_key = f"__NUCLEAR_TACTICAL__{launch_tactical}"
+            merged[nuke_key] = DiplomaticAction(
+                target_country=nuke_key,
+                reason=f"戦術核使用: {launch_tactical}"
+            )
+
+        launch_strategic = major_dipl_dict.get("launch_strategic_nuclear")
+        if launch_strategic:
+            count = major_dipl_dict.get("strategic_nuclear_count", 5)
+            nuke_key = f"__NUCLEAR_STRATEGIC__{launch_strategic}:{count}"
+            merged[nuke_key] = DiplomaticAction(
+                target_country=nuke_key,
+                reason=f"戦略核使用: {launch_strategic} ({count}発)"
+            )
+
+        deploy_ally = major_dipl_dict.get("deploy_nuclear_to_ally")
+        if deploy_ally:
+            deploy_count = major_dipl_dict.get("deploy_nuclear_count", 10)
+            nuke_key = f"__NUCLEAR_DEPLOY__{deploy_ally}:{deploy_count}"
+            merged[nuke_key] = DiplomaticAction(
+                target_country=nuke_key,
+                reason=f"核配備: {deploy_ally}に{deploy_count}発"
+            )
+
+        if major_dipl_dict.get("remove_hosted_nuclear"):
+            merged["__NUCLEAR_REMOVE_HOSTED__"] = DiplomaticAction(
+                target_country="__NUCLEAR_REMOVE_HOSTED__",
+                reason="自国領土の他国核撤去"
+            )
+
+        # 核開発投資率を仮想フラグに変換（M-06のinvest_nuclearから取得）
+        invest_nuclear = military_data.get("invest_nuclear", 0.0)
+        if invest_nuclear > 0:
+            nuke_key = f"__NUCLEAR_INVEST__{invest_nuclear}"
+            merged[nuke_key] = DiplomaticAction(
+                target_country=nuke_key,
+                reason=f"核開発投資: {invest_nuclear:.2f}"
             )
 
         return AgentAction(

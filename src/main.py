@@ -62,6 +62,12 @@ def initialize_world(data_dir: str = None) -> WorldState:
                 energy_self_sufficiency=_safe_float(row.get("energy_self_sufficiency"), 0.13),
                 energy_reserve_target_turns=_safe_float(row.get("energy_reserve_target_turns"), 1.0),
                 energy_reserve_turns=_safe_float(row.get("energy_reserve_target_turns"), 1.0),  # 初期備蓄は目標値でスタート
+                # v1-3: 核兵器パラメータ（CSVから読み込む）
+                nuclear_warheads=int(_safe_float(row.get("nuclear_warheads"), 0)),
+                nuclear_dev_step=int(_safe_float(row.get("nuclear_dev_step"), 0)),
+                has_second_strike=row.get("has_second_strike", "").strip().lower() == "true",
+                nuclear_host_provider=row.get("nuclear_host_provider", "").strip() or None,
+                nuclear_hosted_warheads=int(_safe_float(row.get("nuclear_hosted_warheads"), 0)),
             )
             # 専制主義国家は初期から支持率を対外偽装する
             # CSVの approval_rating は政府の「公表値（偽装値）」であり、真の民意は不明

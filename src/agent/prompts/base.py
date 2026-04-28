@@ -43,6 +43,24 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
         f"人的資本指数(PWT HCI): {country_state.human_capital_index:.3f} (平均就学年数: {country_state.mean_years_schooling:.1f}年。内生的成長理論に基づき、蓄積されるほどGDPを押し上げる能力が高まる)\n"
     )
     
+    # ☆ 核兵器ステータス（v1-3追加）
+    step_names = {0: "未着手", 1: "ウラン濃縮中", 2: "核実験段階", 3: "実戦配備中", 4: "核保有国"}
+    nuke_step_name = step_names.get(country_state.nuclear_dev_step, str(country_state.nuclear_dev_step))
+    if country_state.nuclear_warheads > 0 or country_state.nuclear_dev_step > 0:
+        my_info += f"\n---☢️【核兵器ステータス】☢️---\n"
+        my_info += f"核弾頭保有数: {country_state.nuclear_warheads}発\n"
+        my_info += f"開発段階: {nuke_step_name}\n"
+        if country_state.nuclear_dev_step in (1, 2, 3):
+            progress = (country_state.nuclear_dev_invested / max(1.0, country_state.nuclear_dev_target)) * 100
+            my_info += f"開発進捗: {country_state.nuclear_dev_invested:.1f}/{country_state.nuclear_dev_target:.1f} ({progress:.0f}%)\n"
+        if country_state.has_second_strike:
+            my_info += f"第二撃能力: ✅ 保有（SSBN/ICBM分散配備）\n"
+        if country_state.nuclear_hosted_warheads > 0:
+            my_info += f"他国配備核: {country_state.nuclear_host_provider}から{country_state.nuclear_hosted_warheads}発配備中\n"
+        my_info += "\n"
+    elif country_state.nuclear_hosted_warheads > 0:
+        my_info += f"\n☢️ 他国核配備: {country_state.nuclear_host_provider}から{country_state.nuclear_hosted_warheads}発が自国領土に配備中\n\n"
+    
     if country_state.turns_until_election is not None:
          my_info += f"次回の選挙まで残り: {country_state.turns_until_election}ターン (支持率が低いと落選します)\n"
     else:
@@ -185,6 +203,18 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
             real_gdppc   = p_state.economy / max(0.1, p_state.population)
             disp_gdppc   = p_state.reported_gdp_per_capita    if p_state.reported_gdp_per_capita    is not None else real_gdppc
 
+            # 核情報の表示（v1-3）
+            nuke_info = ""
+            if p_state.nuclear_warheads > 0:
+                nuke_info = f", ☢️核弾頭={p_state.nuclear_warheads}発"
+                if p_state.has_second_strike:
+                    nuke_info += "(第二撃能力あり)"
+            elif p_state.nuclear_dev_step > 0 and p_state.nuclear_dev_step < 4:
+                dev_names = {1: "濃縮中", 2: "実験段階", 3: "配備中"}
+                nuke_info = f", ☢️核開発={dev_names.get(p_state.nuclear_dev_step, '?')}"
+            if p_state.nuclear_hosted_warheads > 0:
+                nuke_info += f", 核配備={p_state.nuclear_host_provider}から{p_state.nuclear_hosted_warheads}発"
+
             other_info += (
                 f"- {p_name} ({p_state.government_type.value}): "
                 f"経済力={disp_econ:.1f}, "
@@ -192,7 +222,7 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
                 f"諜報力={disp_intel:.1f}, "
                 f"支持率={disp_approval:.1f}%, "
                 f"1人当GDP={disp_gdppc:.1f}, "
-                f"関係={rel_str}{war_info}{suzerain_info}\n"
+                f"関係={rel_str}{war_info}{suzerain_info}{nuke_info}\n"
             )
 
             

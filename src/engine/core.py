@@ -10,6 +10,7 @@ from .economy import EconomyMixin
 from .military import MilitaryMixin
 from .events import EventsMixin
 from .public_opinion import PublicOpinionMixin
+from .nuclear import NuclearMixin
 from .utils import UtilsMixin
 
 class WorldEngine(
@@ -19,6 +20,7 @@ class WorldEngine(
     MilitaryMixin,
     EventsMixin,
     PublicOpinionMixin,
+    NuclearMixin,
     UtilsMixin
 ):
     """世界の毎ターンの出来事を処理し、状態を更新するエンジン"""
@@ -247,10 +249,16 @@ class WorldEngine(
         # 3. 貿易と制裁の処理 (Gravity Model & Sanctions Damage applying)
         self._process_trade_and_sanctions()
             
-        # 4. 戦争状態の処理
+        # 4. 核兵器システムの処理（v1-3追加）
+        self._process_nuclear_development(actions)   # 核開発・弾頭量産
+        self._process_nuclear_strikes(actions)        # 核使用ダメージ適用
+        self._process_nuclear_deployment(actions)     # 核配備（同盟国への核展開）
+        self._process_nuclear_alliance_cleanup()      # 同盟破棄時の核自動撤去
+        
+        # 5. 戦争状態の処理
         self._process_wars()
         
-        # 5. ランダムイベント（災害・技術革新）の判定
+        # 6. ランダムイベント（災害・技術革新）の判定
         self._process_random_events()
         
         # 6. 時間進行とターン終了処理は外部 (main.py) から advance_time() を呼び出すよう変更

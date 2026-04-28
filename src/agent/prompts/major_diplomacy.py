@@ -51,8 +51,19 @@ def build_major_diplomacy_prompt(
     else:
         blockade_info = "  なし\n"
 
-    other_countries = [n for n in world_state.countries if n != country_name]
-    example_target = other_countries[0] if other_countries else "対象国"
+    # 核兵器状況（v1-3追加）
+    nuclear_info = ""
+    if country_state.nuclear_warheads > 0:
+        nuclear_info = f"""
+【☢️ 核兵器状況】
+自国核弾頭: {country_state.nuclear_warheads}発
+第二撃能力: {"あり" if country_state.has_second_strike else "なし"}
+"""
+    elif country_state.nuclear_hosted_warheads > 0:
+        nuclear_info = f"""
+【☢️ 核配備状況】
+{country_state.nuclear_host_provider}から{country_state.nuclear_hosted_warheads}発が配備中
+"""
 
     return ctx + f"""
 【🏛️ 大統領施政方針 ({stance})】
@@ -64,7 +75,7 @@ def build_major_diplomacy_prompt(
 {alliance_info}
 【海峡封鎖状況】
 {blockade_info}
-
+{nuclear_info}
 あなたは「{country_name}」の大統領として、**重大な外交決定のみ**を行ってください。
 重大外交とは以下を指します:
 - 宣戦布告（declare_war: true）
@@ -75,9 +86,14 @@ def build_major_diplomacy_prompt(
 - 降伏勧告/受諾（demand_surrender / accept_surrender）
 - 海峡封鎖宣言（declare_strait_blockade: "海峡名"）
 - 海峡封鎖解除（resolve_strait_blockade: "海峡名"）
+- ☢️ 戦術核使用（launch_tactical_nuclear: "対象国名"）— 交戦中のみ。前線の敵軍事力に大ダメージ。弾頭1発消費。
+- ☢️ 戦略核使用（launch_strategic_nuclear: "対象国名"）— 交戦中のみ。敵の経済・人口・軍事に壊滅的ダメージ。弾頭5発消費。
+- ☢️ 同盟国への核配備（deploy_nuclear_to_ally: "同盟国名", deploy_nuclear_count: 数値）
+- ☢️ 自国領土の他国核撤去（remove_hosted_nuclear: true）
 
 【ルール】
 - 不要なアクションは出力しない（何もしない場合は major_diplomatic_actions: []）
+- 核使用は交戦中の敵国にのみ可能。保有弾頭数が足りない場合は使用不可。
 - 海峡封鎖は自国が資格を持つ場合のみ（イラン→ホルムズ海峡、アメリカ→ホルムズ海峡等）
 - 施政方針に従い、合理的な判断のみ行う
 
@@ -100,6 +116,12 @@ def build_major_diplomacy_prompt(
     }}
   ],
   "declare_strait_blockade": null,
-  "resolve_strait_blockade": null
+  "resolve_strait_blockade": null,
+  "launch_tactical_nuclear": null,
+  "launch_strategic_nuclear": null,
+  "strategic_nuclear_count": 5,
+  "deploy_nuclear_to_ally": null,
+  "deploy_nuclear_count": 0,
+  "remove_hosted_nuclear": false
 }}
 """

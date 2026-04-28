@@ -18,11 +18,11 @@ def build_defense_minister_prompt(country_name: str, country_state: CountryState
             analyst_section += f"▼ 対{target_name}分析レポート:\n{report}\n\n"
 
     instructions = """
-あなたの役目は、「軍事投資の予算要求」「諜報・裏工作の最終決定」を行うことです。
+あなたの役目は、「軍事投資の予算要求」「諜報・裏工作の最終決定」「☢️核開発投資の予算要求」を行うことです。
 回答は必ず日本語で行ってください。
 
 ⚠️ thought_process には以下を必ず含めてください（大統領への提言として使われます）：
-①軍事投資推奨値とその根拠、②諜報活動の方針と対象国、③戦時なら投入比率の推奨
+①軍事投資推奨値とその根拠、②諜報活動の方針と対象国、③戦時なら投入比率の推奨、④核戦略に関する提言
 
 【軍事投資（request_invest_military）の決定ルール：リチャードソン・モデル】
 1. 相手側の脅威: 相手の軍事力が自国に迫る、あるいは上回っている場合は、強い危機感を持ち増強を推奨。
@@ -31,6 +31,16 @@ def build_defense_minister_prompt(country_name: str, country_state: CountryState
 
 【諜報投資（request_invest_intelligence）の決定ルール】
 諜報レベルが相手より高いほど有利。継続的な投資が必要です。
+
+【☢️ 核開発投資（request_invest_nuclear）の決定ルール】
+- 核開発は4段階（1:ウラン濃縮→2:核実験→3:実戦配備→4:核保有国）で進行。
+- Step4到達後は核弾頭の量産に充当される。
+- 核開発はGDPの大きな割合を消費するため、経済負担とのバランスを十分に考慮すること。
+- 0.0の場合、核開発に予算を割かない（核開発しない）。
+
+【☢️ 核使用の提言（nuclear_use_recommendation）】
+- 大統領への助言として核使用を提言できます。最終決定は大統領が行います。
+- 形式: "tactical:対象国名" or "strategic:対象国名" or null
 
 【諜報・破壊工作（espionage_decisions）】
 これらはあなたの最終決定です。大統領への確認は不要です。
@@ -66,6 +76,8 @@ def build_defense_minister_prompt(country_name: str, country_state: CountryState
   "reasoning_for_military_investment": "リチャードソン・モデルに基づく軍事投資の算出プロセス",
   "request_invest_military": 0.0から1.0の数値,
   "request_invest_intelligence": 0.0から1.0の数値,
+  "request_invest_nuclear": 0.0から1.0の数値,
+  "nuclear_use_recommendation": null,
   "war_commitment_ratios": {"交戦相手国名": 0.1から1.0の数値},
   "espionage_decisions": [
     {
@@ -81,5 +93,7 @@ def build_defense_minister_prompt(country_name: str, country_state: CountryState
 }
 ※ war_commitment_ratios は交戦中でない場合は {} にしてください。
 ※ espionage_decisions は対象国がない場合は [] にしてください。
+※ request_invest_nuclear は核開発を行わない場合は 0.0 にしてください。
+※ nuclear_use_recommendation は核使用を提言しない場合は null にしてください。
 """
     return common_ctx + analyst_section + instructions

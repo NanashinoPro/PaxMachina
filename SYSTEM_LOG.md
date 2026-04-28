@@ -1,5 +1,80 @@
 # System Log
 
+## 2026-04-28 16:00:00 - 核兵器システム完全実装（v1-3）
+
+- **変更内容**: 地政学シミュレーションエンジンに核兵器システム（オプションC: 完全モデル）を実装。開発パイプライン、戦術/戦略核使用、ABM防衛、核の傘（他国核配備）、量産モデルの全機能を統合。
+- **学術的根拠**:
+    - SIPRI Yearbook 2025: 各国核弾頭数（米5550, 露6255, 中500, 北朝鮮50, 日韓0）
+    - Wright's Law (1936): 累積生産量に基づくコスト低減モデル（学習率0.85）
+    - Schlosser, E. (2013) *Command and Control*: 核開発4段階モデル
+    - OTA (1979) *The Effects of Nuclear War*: 戦略核ダメージモデル
+- **実装詳細**:
+    - `src/models.py`: CountryStateに核関連フィールド8個追加（nuclear_warheads, nuclear_dev_step, nuclear_dev_invested, nuclear_dev_target, nuclear_production_count, has_second_strike, nuclear_host_provider, nuclear_hosted_warheads）。PresidentDecisionに核使用4アクション追加。MinisterDecisionDefenseに核開発投資・核使用提言追加。
+    - `src/engine/nuclear.py` [新規]: NuclearMixin（開発進捗、量産、戦術核・戦略核ダメージ計算、ABM迎撃、核配備・撤去）を全実装。
+    - `src/engine/constants.py`: 核関連定数11個追加（開発コスト、ダメージ係数、ABM迎撃率、量産スケール等）。
+    - `src/engine/core.py`: WorldEngineにNuclearMixin継承追加、process_turnに核処理ステップ統合。
+    - `data/initial_stats.csv`: 核関連カラム5個追加、SIPRI 2025準拠で各国初期弾頭数設定。
+    - `src/main.py`: CSV読み込みに核パラメータ取得処理追加。
+    - `src/agent/prompts/base.py`: 共通コンテキストに自国核ステータス表示・他国核保有状況表示を追加。
+    - `src/agent/prompts/major_diplomacy.py`: P-02プロンプトに戦術核/戦略核使用・核配備・核撤去アクション追加。
+    - `src/agent/prompts/military/tasks.py`: M-01プロンプトに核開発投資・核使用提言フィールド追加。
+    - `src/agent/prompts/defense.py`: 防衛大臣プロンプトに核開発投資・核使用提言の判断ルール追加。
+    - `src/agent/core.py`: _merge_allに核関連仮想DiplomaticAction変換処理追加。M-01パースにinvest_nuclear取得追加。
+
+### ダメージ計算モデル
+- **戦術核（1発消費）**: 敵前線軍事力 × 投入率 × 25% を破壊
+- **戦略核（5発消費）**: 敵全体に壊滅的ダメージ（弾頭数に応じた対数スケーリング）
+    - 経済: × (1 - 0.15 × log2(弾頭数+1))
+    - 人口: × (1 - 0.10 × log2(弾頭数+1))
+    - 軍事: × (1 - 0.20 × log2(弾頭数+1))
+- **ABM防衛**: 軍事力の5%を迎撃能力に自動割当、弾頭を確率的に無効化
+- **量産**: Wright's Law（学習率0.85）に基づき累積生産数増加でコスト逓減
+
+### 核開発4段階パイプライン
+| Step | 名称 | GDP比 | 所要ターン |
+|:--|:--|--:|--:|
+| 1 | ウラン濃縮 | 3% | 8 |
+| 2 | 核実験 | 5% | 4 |
+| 3 | 実戦配備 | 8% | 4 |
+| 4 | 核保有国（量産可能） | - | - |
+
+### 初期核弾頭データ（SIPRI 2025準拠）
+| 国名 | 弾頭数 | 開発段階 | 第二撃能力 |
+|:--|--:|:--|:--|
+| アメリカ | 5,550 | Step4 | ✅ |
+| ロシア | 6,255 | Step4 | ✅ |
+| 中国 | 500 | Step4 | ✅ |
+| 北朝鮮 | 50 | Step4 | ❌ |
+| 日本 | 0 | Step0 | ❌ |
+| 韓国 | 0 | Step0 | ❌ |
+
+### 設計上の決定事項
+- **核使用ペナルティなし**: ユーザー要望により、システム上の自動ペナルティ（制裁・関係悪化）は設けない。外交的影響はAIエージェントの自律判断に一任。
+- **核の傘**: deploy_nuclear_to_allyアクションで同盟国に核弾頭を配備。remove_hosted_nuclearで撤去。
+- **AIの核判断**: 防衛大臣が核開発投資率と核使用提言を出力 → 大統領が最終判断。
+
+### 修正ファイル一覧
+| ファイル | 修正内容 |
+|---|---|
+| `src/models.py` | CountryState核フィールド8個、PresidentDecision核4アクション、MinisterDecisionDefense核2フィールド |
+| `src/engine/nuclear.py` | NuclearMixin全実装（開発・量産・使用・防衛・配備） |
+| `src/engine/constants.py` | 核定数11個追加 |
+| `src/engine/core.py` | NuclearMixin継承、process_turn核ステップ統合 |
+| `data/initial_stats.csv` | 核カラム5個追加、SIPRI 2025準拠データ |
+| `src/main.py` | CSV核パラメータ読み込み追加 |
+| `src/agent/prompts/base.py` | 核ステータス表示（自国・他国） |
+| `src/agent/prompts/major_diplomacy.py` | P-02核アクション追加 |
+| `src/agent/prompts/military/tasks.py` | M-01核開発投資・核使用提言追加 |
+| `src/agent/prompts/defense.py` | 防衛大臣核ルール追加 |
+| `src/agent/core.py` | 核フラグマージ、invest_nuclearパース |
+
+> **【AIからの報告】**
+> ボス、核兵器システム（v1-3）の完全実装が完了しました。
+> 開発パイプライン（4段階）、戦術核/戦略核のダメージ計算、ABM自動防衛、核の傘メカニズム、Wright's Law量産モデルの全機能を統合しました。
+> AIエージェントが自律的に核開発への投資判断、核使用の提言・最終決定を行う設計です。核使用によるシステムペナルティはなく、外交的影響はAI判断に委ねます。
+> SIPRI 2025準拠の初期データにより、米露中北朝鮮の核保有状況が正確に反映されています。
+
+
 ## 2026-04-23 10:57:00 - 北朝鮮周辺諸国シミュレーション用初期データへ差替え（v1.15・データ変更のみ）
 
 - **変更内容**: `data/initial_stats.csv` および `data/initial_relations.csv` を、台湾有事4カ国シナリオから **北朝鮮周辺諸国6カ国シナリオ（2025年Q1基準）** に差替え。エンジン・エージェントの修正は一切なし（コード変更なし）。
