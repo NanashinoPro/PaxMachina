@@ -164,7 +164,17 @@ class WorldEngine(
         for country_name, country in self.state.countries.items():
             old_gdp = country.economy
             tax_revenue = old_gdp * country.tax_rate
-            interest_payment = country.national_debt * DEBT_INTEREST_RATE
+            
+            # 動的金利モデル（Reinhart & Rogoff 2010: 債務GDP比連動）
+            # 基本金利 + 60%超で信用スプレッド加算（10%ごとに+0.5%/四半期）
+            debt_ratio = country.national_debt / max(1.0, old_gdp)
+            if debt_ratio > 0.6:
+                credit_spread = (debt_ratio - 0.6) * 0.05  # 連続的ペナルティ
+                effective_rate = DEBT_INTEREST_RATE + credit_spread
+            else:
+                effective_rate = DEBT_INTEREST_RATE
+            
+            interest_payment = country.national_debt * effective_rate
             
             # 予算が利払いを下回る場合はデフォルト（未払い分は借金に上乗せ）
             total_revenue = tax_revenue + country.tariff_revenue  # 税収 + 関税収入
@@ -175,6 +185,12 @@ class WorldEngine(
                 default_amount = interest_payment - total_revenue
                 country.national_debt += default_amount  # 払えなかった利息が元本組み込み（複利）
                 self.sys_logs_this_turn.append(f"[{country_name} デフォルト] 利払い不能。未払利息 {default_amount:.1f} を債務に追加。")
+            
+            if effective_rate > DEBT_INTEREST_RATE + 0.001:
+                self.sys_logs_this_turn.append(
+                    f"[{country_name} 信用スプレッド] 債務GDP比{debt_ratio:.0%} → 実効金利{effective_rate:.2%}/Q "
+                    f"(基本{DEBT_INTEREST_RATE:.2%} + スプレッド{effective_rate - DEBT_INTEREST_RATE:.2%})"
+                )
             
             if country.tariff_revenue > 0:
                 self.sys_logs_this_turn.append(f"[{country_name} 関税収入] {country.tariff_revenue:.1f} を歳入に計上 (税収:{tax_revenue:.1f} + 関税:{country.tariff_revenue:.1f} = {total_revenue:.1f})")

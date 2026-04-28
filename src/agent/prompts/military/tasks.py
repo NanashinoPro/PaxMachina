@@ -1,3 +1,8 @@
+"""
+M-01: 軍事投資（金額ベース）+ 核開発投資
+M-02: 諜報投資（金額ベース）
+M-03: 前線投入比率
+"""
 from typing import Dict
 from models import WorldState, CountryState, PresidentPolicy
 from agent.prompts.base import build_common_context
@@ -8,7 +13,7 @@ def build_military_invest_prompt(
     country_name: str, country_state: CountryState, world_state: WorldState,
     policy: PresidentPolicy, analyst_reports: Dict[str, str] = None, past_news=None
 ) -> str:
-    """M-01: 軍事投資比率の決定 + 核開発投資（flash）"""
+    """M-01: 軍事投資額の決定 + 核開発投資（flash）"""
     ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="軍事担当官（軍事投資・核戦略）")
     ar = ""
     if analyst_reports:
@@ -24,15 +29,22 @@ def build_military_invest_prompt(
         progress = (country_state.nuclear_dev_invested / max(1.0, country_state.nuclear_dev_target)) * 100
         nuke_section += f"開発進捗: {country_state.nuclear_dev_invested:.1f}/{country_state.nuclear_dev_target:.1f} ({progress:.0f}%)\n"
 
+    budget = country_state.government_budget
+    debt_ratio = country_state.national_debt / max(1.0, country_state.economy) * 100
+
     return ctx + build_policy_section(policy) + ar + nuke_section + f"""
 現在の軍事力={country_state.military:.1f} / 経済力={country_state.economy:.1f}
+
+【💰 今期の政府歳入: {budget:.1f} B$】
+国家債務: {country_state.national_debt:.1f} B$ (対GDP比: {debt_ratio:.0f}%)
+歳入を超える額を要求することも可能ですが、超過分は赤字国債として発行され、利払い負担が増大します。
 
 【リチャードソン・モデルに基づく算出プロセス】
 1. 相手側の脅威: 自国より強い敵がいるか？
 2. 経済的疲弊: 軍事投資は経済を圧迫するか？
 3. 動員限界(10%の壁): 軍事力が人口×10%を超えていないか？
 
-【☢️ 核開発投資（invest_nuclear）の決定ルール】
+【☢️ 核開発投資（request_nuclear）の決定ルール】
 - 核開発は4段階（1:ウラン濃縮→2:核実験→3:実戦配備→4:核保有国）で進行。
 - 0.0の場合、核開発に予算を割かない。Step4到達後は弾頭量産に充当。
 - 大きな経済負担を伴うため、戦略的必要性を十分に検討すること。
@@ -41,10 +53,10 @@ def build_military_invest_prompt(
 - 交戦中の場合のみ。大統領への助言として核使用を提言可能。
 - 形式: "tactical:対象国名" or "strategic:対象国名" or null
 
-施政方針（{policy.stance}）に従い、reasoning_for_military_investmentで算出プロセスを説明した上で投資比率を決定してください。
+施政方針（{policy.stance}）に従い、reasoning_for_military_investmentで算出プロセスを説明した上で投資額を決定してください。
 
-JSONのみ出力（コードブロック不要、数値は自分で判断すること）:
-{{"invest_military": ???, "invest_nuclear": ???, "nuclear_use_recommendation": null, "reasoning_for_military_investment": "算出プロセスの説明"}}
+JSONのみ出力（コードブロック不要、金額はB$単位で指定）:
+{{"request_military": ???, "request_nuclear": ???, "nuclear_use_recommendation": null, "reasoning_for_military_investment": "算出プロセスの説明"}}
 """
 
 
@@ -52,16 +64,19 @@ def build_intel_invest_prompt(
     country_name: str, country_state: CountryState, world_state: WorldState,
     policy: PresidentPolicy, past_news=None
 ) -> str:
-    """M-02: 諜報投資比率の決定（flash-lite）"""
+    """M-02: 諜報投資額の決定（flash-lite）"""
     ctx = build_common_context(country_name, country_state, world_state, past_news, role_name="諜報担当官（諜報投資）")
     others_intel = {n: s.intelligence_level for n, s in world_state.countries.items() if n != country_name}
     intel_str = ", ".join(f"{n}:{v:.1f}" for n, v in others_intel.items())
+    budget = country_state.government_budget
     return ctx + build_policy_section(policy) + f"""
 自国諜報レベル={country_state.intelligence_level:.1f} / 他国: {intel_str}
-【ルール】諜報レベルが高いほど諜報成功率が向上。invest_intelligence(0.0〜1.0)で蓄積。
 
-JSONのみ出力（コードブロック不要、数値は自分で判断すること）:
-{{"invest_intelligence": ???, "reason": "理由（30文字以内）"}}
+【💰 今期の政府歳入: {budget:.1f} B$】
+【ルール】諜報レベルが高いほど諜報成功率が向上。金額（B$単位）で投資額を指定してください。
+
+JSONのみ出力（コードブロック不要、金額はB$単位で指定）:
+{{"request_intelligence": ???, "reason": "理由（30文字以内）"}}
 """
 
 
@@ -78,13 +93,18 @@ def build_war_commitment_prompt(
         elif w.defender == country_name:
             war_info += f"  🛡️ 対{w.aggressor}: 防衛側 / 被占領率{w.target_occupation_progress:.1f}% / 現投入率{w.defender_commitment_ratio:.0%}\n"
     return ctx + build_policy_section(policy) + f"""
-【現在の交戦状況】
-{war_info}
-【ルール】war_commitment_ratio(0.1〜1.0): 高投入(0.7〜0.9)=短期決戦志向。低投入(0.1〜0.3)=持久戦・経済重視。
-1ターンの変動上限±10%。変更不要なら空の辞書を返してください。
+現在の軍事力={country_state.military:.1f}
 
-JSONのみ出力（コードブロック不要、war_commitment_ratiosの値は0.1〜1.0で自分で判断すること）:
-{{"war_commitment_ratios": {{"<相手国名>": ???}}, "reason": "理由（30文字以内）"}}
+【交戦状況】
+{war_info}
+
+【ルール】
+- 投入比率(0.0〜1.0)で前線の兵力投入を設定
+- 防御側は高い投入率を維持するのが自然。攻撃側は兵站を考慮。
+- 投入比率は±{0.10:.0%}/ターンまでの変動制限あり（動員速度制限）
+
+JSONのみ出力:
+{{"commitment_ratio": ???, "reason": "理由（30文字以内）"}}
 """
 
 

@@ -507,38 +507,41 @@ class AgentSystem:
         analyst_reports: Dict[str, str], past_news: List[str]
     ) -> dict:
         """M-01〜M-05: 軍事・諜報タスク群を実行して辞書で返す"""
+        budget = country_state.government_budget
+        default_mil = budget * 0.15
+        default_intel = budget * 0.05
         result = {
-            "invest_military": 0.15,
+            "request_military": default_mil,
             "reasoning_for_military_investment": "デフォルト",
-            "invest_intelligence": 0.05,
-            "invest_nuclear": 0.0,  # v1-3: 核開発投資
+            "request_intelligence": default_intel,
+            "request_nuclear": 0.0,  # v1-3: 核開発投資（金額）
             "war_commitment_ratios": {},
             "espionage_actions": [],  # List[dict] {target, gather, gather_strategy, sabotage, sabotage_strategy, sabotage_reasoning}
         }
 
-        # M-01: 軍事投資
+        # M-01: 軍事投資（金額ベース）
         try:
             raw = self._execute_agent(country_name, "軍事:投資(M-01)",
                 build_military_invest_prompt(country_name, country_state, world_state, policy, analyst_reports, past_news),
                 "mil_invest", "gemini-2.5-flash")
             d = self._safe_json(raw)
-            result["invest_military"] = float(d.get("invest_military", 0.15))
+            result["request_military"] = max(0.0, float(d.get("request_military", default_mil)))
             result["reasoning_for_military_investment"] = d.get("reasoning_for_military_investment") or ""
             # v1-3: 核開発投資と核使用提言
-            result["invest_nuclear"] = float(d.get("invest_nuclear", 0.0))
+            result["request_nuclear"] = max(0.0, float(d.get("request_nuclear", 0.0)))
             nuke_rec = d.get("nuclear_use_recommendation")
             if nuke_rec:
                 self.logger.sys_log(f"[{country_name}:M-01] 核使用提言: {nuke_rec}")
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:M-01] エラー: {e}", "ERROR")
 
-        # M-02: 諜報投資
+        # M-02: 諜報投資（金額ベース）
         try:
             raw = self._execute_agent(country_name, "軍事:諜報投資(M-02)",
                 build_intel_invest_prompt(country_name, country_state, world_state, policy, past_news),
                 "mil_intel", "gemini-2.5-flash-lite")
             d = self._safe_json(raw)
-            result["invest_intelligence"] = float(d.get("invest_intelligence", 0.05))
+            result["request_intelligence"] = max(0.0, float(d.get("request_intelligence", default_intel)))
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:M-02] エラー: {e}", "ERROR")
 
@@ -604,9 +607,10 @@ class AgentSystem:
         # デフォルト値
         tax_rate = country_state.tax_rate
         target_tariff_rates: Dict[str, float] = {}
-        invest_economy = 0.35
-        invest_welfare = 0.25
-        invest_education_science = 0.05
+        budget = country_state.government_budget
+        request_economy = budget * 0.35
+        request_welfare = budget * 0.25
+        request_education = budget * 0.05
         target_press_freedom = country_state.press_freedom
         report_economy = None; report_military = None
         report_approval_rating = None; report_intelligence_level = None; report_gdp_per_capita = None
@@ -635,33 +639,33 @@ class AgentSystem:
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:I-02] エラー: {e}", "ERROR")
 
-        # I-03: 経済投資
+        # I-03: 経済投資（金額ベース）
         try:
             raw = self._execute_agent(country_name, "内政:経済投資(I-03)",
                 build_economy_invest_prompt(country_name, country_state, world_state, policy, past_news),
                 "dom_econ", "gemini-2.5-flash-lite")
             d = self._safe_json(raw)
-            invest_economy = float(d.get("invest_economy", invest_economy))
+            request_economy = max(0.0, float(d.get("request_economy", request_economy)))
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:I-03] エラー: {e}", "ERROR")
 
-        # I-04: 福祉投資
+        # I-04: 福祉投資（金額ベース）
         try:
             raw = self._execute_agent(country_name, "内政:福祉投資(I-04)",
                 build_welfare_invest_prompt(country_name, country_state, world_state, policy, past_news),
                 "dom_welfare", "gemini-2.5-flash-lite")
             d = self._safe_json(raw)
-            invest_welfare = float(d.get("invest_welfare", invest_welfare))
+            request_welfare = max(0.0, float(d.get("request_welfare", request_welfare)))
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:I-04] エラー: {e}", "ERROR")
 
-        # I-05: 教育・科学投資
+        # I-05: 教育・科学投資（金額ベース）
         try:
             raw = self._execute_agent(country_name, "内政:教育投資(I-05)",
                 build_education_invest_prompt(country_name, country_state, world_state, policy, past_news),
-                "dom_edu", "gemini-2.5-flash-lite")
+                "dom_education", "gemini-2.5-flash-lite")
             d = self._safe_json(raw)
-            invest_education_science = float(d.get("invest_education_science", invest_education_science))
+            request_education = max(0.0, float(d.get("request_education", request_education)))
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:I-05] エラー: {e}", "ERROR")
 
@@ -705,9 +709,9 @@ class AgentSystem:
         return DomesticAction(
             tax_rate=tax_rate,
             target_tariff_rates=target_tariff_rates,
-            invest_economy=invest_economy,
-            invest_welfare=invest_welfare,
-            invest_education_science=invest_education_science,
+            invest_economy=0.35,  # 後でPhase1-Eで上書きされる
+            invest_welfare=0.25,  # 後でPhase1-Eで上書きされる
+            invest_education_science=0.05,  # 後でPhase1-Eで上書きされる
             target_press_freedom=target_press_freedom,
             report_economy=report_economy,
             report_military=report_military,
@@ -720,57 +724,100 @@ class AgentSystem:
             invest_intelligence=0.05,    # 後でPhase1-Eで上書きされる
             reasoning_for_military_investment="Phase1-Cより取得",
             reason=reason,
-        )
+        ), request_economy, request_welfare, request_education
 
     # =================================================================
     # Phase 1-E: 予算正規化（B-01）
     # =================================================================
 
     def _run_phase1e_normalize(
-        self, country_name: str, policy: PresidentPolicy,
-        invest_military: float, invest_intelligence: float,
-        invest_economy: float, invest_welfare: float, invest_education_science: float,
+        self, country_name: str, country_state: CountryState,
+        policy: PresidentPolicy,
+        request_military: float, request_intelligence: float,
+        request_economy: float, request_welfare: float, request_education: float,
+        request_nuclear: float,
     ) -> dict:
-        """B-01: 予算正規化（flash-lite）- 合計>1.0の場合のみLLM呼び出し"""
-        total = invest_military + invest_intelligence + invest_economy + invest_welfare + invest_education_science
-        base = {
-            "invest_military": invest_military,
-            "invest_intelligence": invest_intelligence,
-            "invest_economy": invest_economy,
-            "invest_welfare": invest_welfare,
-            "invest_education_science": invest_education_science,
-        }
-        if total <= 1.001:
-            self.logger.sys_log(f"[{country_name}:B-01] 予算合計={total:.3f} ≤ 1.0 → 正規化スキップ")
-            return base
+        """B-01: 予算配分（flash-lite）- 金額ベースの要求を受け比率に変換"""
+        budget = country_state.government_budget
+        total_request = request_military + request_intelligence + request_economy + request_welfare + request_education + request_nuclear
 
-        self.logger.sys_log(f"[{country_name}:B-01] 予算合計={total:.3f} > 1.0 → LLM正規化実行")
+        self.logger.sys_log(
+            f"[{country_name}:B-01] 歳入={budget:.1f} / 要求合計={total_request:.1f} "
+            f"({'赤字' if total_request > budget else '黒字'})"
+        )
+
+        # B-01 LLMによる最終配分
         try:
             prompt = build_budget_normalize_prompt(
                 country_name, policy,
-                invest_military, invest_intelligence,
-                invest_economy, invest_welfare, invest_education_science,
+                request_military, request_intelligence,
+                request_economy, request_welfare, request_education, request_nuclear,
+                budget, country_state.national_debt, country_state.economy,
             )
-            raw = self._execute_agent(country_name, "予算正規化(B-01)", prompt, "budget_norm", "gemini-2.5-flash-lite")
+            raw = self._execute_agent(country_name, "予算配分(B-01)", prompt, "budget_norm", "gemini-2.5-flash-lite")
             d = self._safe_json(raw)
-            normalized = {
-                "invest_military": float(d.get("invest_military", invest_military)),
-                "invest_intelligence": float(d.get("invest_intelligence", invest_intelligence)),
-                "invest_economy": float(d.get("invest_economy", invest_economy)),
-                "invest_welfare": float(d.get("invest_welfare", invest_welfare)),
-                "invest_education_science": float(d.get("invest_education_science", invest_education_science)),
-            }
-            # LLM結果でも超過している場合はフォールバックで単純按分
-            new_total = sum(normalized.values())
-            if new_total > 1.001:
-                scale = 1.0 / new_total
-                normalized = {k: round(v * scale, 4) for k, v in normalized.items()}
-                self.logger.sys_log(f"[{country_name}:B-01] LLM結果も超過({new_total:.3f}) → 単純按分にフォールバック")
-            return normalized
+
+            final_military = max(0.0, float(d.get("budget_military", request_military)))
+            final_intelligence = max(0.0, float(d.get("budget_intelligence", request_intelligence)))
+            final_economy = max(0.0, float(d.get("budget_economy", request_economy)))
+            final_welfare = max(0.0, float(d.get("budget_welfare", request_welfare)))
+            final_education = max(0.0, float(d.get("budget_education", request_education)))
+            final_nuclear = max(0.0, float(d.get("budget_nuclear", request_nuclear)))
+
         except Exception as e:
-            self.logger.sys_log(f"[{country_name}:B-01] エラー: {e} → 単純按分", "ERROR")
-            scale = 1.0 / total
-            return {k: round(v * scale, 4) for k, v in base.items()}
+            self.logger.sys_log(f"[{country_name}:B-01] エラー: {e} → デフォルト配分", "ERROR")
+            final_military = request_military
+            final_intelligence = request_intelligence
+            final_economy = request_economy
+            final_welfare = request_welfare
+            final_education = request_education
+            final_nuclear = request_nuclear
+
+        # 安全装置: 歳入の2倍超は強制カット
+        total_final = final_military + final_intelligence + final_economy + final_welfare + final_education + final_nuclear
+        max_spending = budget * 2.0
+        if total_final > max_spending and max_spending > 0:
+            scale = max_spending / total_final
+            final_military *= scale
+            final_intelligence *= scale
+            final_economy *= scale
+            final_welfare *= scale
+            final_education *= scale
+            final_nuclear *= scale
+            total_final = max_spending
+            self.logger.sys_log(f"[{country_name}:B-01] 歳出が歳入の2倍超 → 強制カット ({total_final:.1f} B$)")
+
+        # 赤字国債の計算
+        deficit = max(0.0, total_final - budget)
+        if deficit > 0:
+            country_state.national_debt += deficit
+            debt_ratio = country_state.national_debt / max(1.0, country_state.economy) * 100
+            self.logger.sys_log(
+                f"[{country_name} 赤字国債発行] {deficit:.1f} B$ "
+                f"(債務残高: {country_state.national_debt:.1f} B$, 対GDP比: {debt_ratio:.0f}%)"
+            )
+
+        # 金額→比率に変換（エンジン用）
+        effective_budget = max(1.0, total_final)  # ゼロ除算防止
+        normalized = {
+            "invest_military": final_military / effective_budget,
+            "invest_intelligence": final_intelligence / effective_budget,
+            "invest_economy": final_economy / effective_budget,
+            "invest_welfare": final_welfare / effective_budget,
+            "invest_education_science": final_education / effective_budget,
+            "invest_nuclear": final_nuclear / effective_budget,
+        }
+
+        self.logger.sys_log(
+            f"[{country_name}:B-01] 最終配分(B$): 軍事={final_military:.1f} 諜報={final_intelligence:.1f} "
+            f"経済={final_economy:.1f} 福祉={final_welfare:.1f} 教育={final_education:.1f} 核={final_nuclear:.1f} "
+            f"/ 合計={total_final:.1f} / 赤字国債={deficit:.1f}"
+        )
+
+        # エンジンのgovernment_budgetを実際の歳出に更新（赤字国債込み）
+        country_state.government_budget = total_final
+
+        return normalized
 
     # =================================================================
     # マージ: 全タスク出力 → AgentAction
@@ -890,13 +937,13 @@ class AgentSystem:
                 reason="自国領土の他国核撤去"
             )
 
-        # 核開発投資率を仮想フラグに変換（M-06のinvest_nuclearから取得）
-        invest_nuclear = military_data.get("invest_nuclear", 0.0)
+        # 核開発投資率を仮想フラグに変換（B-01で正規化済み）
+        invest_nuclear = normalized.get("invest_nuclear", 0.0)
         if invest_nuclear > 0:
             nuke_key = f"__NUCLEAR_INVEST__{invest_nuclear}"
             merged[nuke_key] = DiplomaticAction(
                 target_country=nuke_key,
-                reason=f"核開発投資: {invest_nuclear:.2f}"
+                reason=f"核開発投資: {invest_nuclear:.4f}"
             )
 
         return AgentAction(
@@ -939,17 +986,18 @@ class AgentSystem:
 
         # Phase 1-D: 内政タスク群
         self.logger.sys_log(f"[{country_name}] Phase1-D: 内政タスク群 (I-01〜I-08)")
-        domestic_action = self._run_phase1d_domestic(country_name, country_state, world_state, policy, past_news or [])
+        domestic_action, req_economy, req_welfare, req_education = self._run_phase1d_domestic(country_name, country_state, world_state, policy, past_news or [])
 
-        # Phase 1-E: 予算正規化
-        self.logger.sys_log(f"[{country_name}] Phase1-E: 予算正規化 (B-01)")
+        # Phase 1-E: 予算配分（金額ベース）
+        self.logger.sys_log(f"[{country_name}] Phase1-E: 予算配分 (B-01)")
         normalized = self._run_phase1e_normalize(
-            country_name, policy,
-            invest_military=military_data["invest_military"],
-            invest_intelligence=military_data["invest_intelligence"],
-            invest_economy=domestic_action.invest_economy,
-            invest_welfare=domestic_action.invest_welfare,
-            invest_education_science=domestic_action.invest_education_science,
+            country_name, country_state, policy,
+            request_military=military_data["request_military"],
+            request_intelligence=military_data["request_intelligence"],
+            request_economy=req_economy,
+            request_welfare=req_welfare,
+            request_education=req_education,
+            request_nuclear=military_data["request_nuclear"],
         )
 
         # マージ

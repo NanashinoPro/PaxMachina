@@ -67,6 +67,8 @@ def initialize_world(data_dir: str = None) -> WorldState:
                 nuclear_dev_step=int(_safe_float(row.get("nuclear_dev_step"), 0)),
                 nuclear_host_provider=row.get("nuclear_host_provider", "").strip() or None,
                 nuclear_hosted_warheads=int(_safe_float(row.get("nuclear_hosted_warheads"), 0)),
+                # v1-3: 国家債務（IMF WEO 2025ベース）
+                national_debt=_safe_float(row.get("national_debt"), 0.0),
             )
             # 専制主義国家は初期から支持率を対外偽装する
             # CSVの approval_rating は政府の「公表値（偽装値）」であり、真の民意は不明

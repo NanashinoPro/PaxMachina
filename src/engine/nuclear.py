@@ -128,18 +128,22 @@ class NuclearMixin:
         if unit_cost <= 0:
             return
 
-        # 今期生産可能な弾頭数
-        new_warheads = int(invest_amount / unit_cost)
+        # 今期生産可能な弾頭数（1四半期あたり最大50発にキャップ）
+        MAX_WARHEADS_PER_TURN = 50
+        new_warheads = min(MAX_WARHEADS_PER_TURN, int(invest_amount / unit_cost))
         if new_warheads > 0:
+            actual_cost = new_warheads * unit_cost
             country.nuclear_warheads += new_warheads
+            # 予算から差し引き（核量産バグ修正）
+            country.government_budget = max(0.0, country.government_budget - actual_cost)
             self.log_event(
                 f"☢️ 【核弾頭生産】{country_name}が{new_warheads}発の核弾頭を新たに製造。"
-                f"（総保有数: {country.nuclear_warheads}発、1発コスト: {unit_cost:.1f}）",
+                f"（総保有数: {country.nuclear_warheads}発、1発コスト: {unit_cost:.1f}、総費用: {actual_cost:.1f}）",
                 involved_countries=[country_name]
             )
             self.sys_logs_this_turn.append(
                 f"[{country_name} 核量産] +{new_warheads}発 (投資: {invest_amount:.1f}, "
-                f"単価: {unit_cost:.1f}, 総数: {country.nuclear_warheads})"
+                f"実費: {actual_cost:.1f}, 単価: {unit_cost:.1f}, 総数: {country.nuclear_warheads})"
             )
 
     def _process_nuclear_strikes(self, actions: Dict):
@@ -371,9 +375,9 @@ class NuclearMixin:
                     if not ally:
                         continue
 
-                    # 同盟チェック
+                    # 同盟チェック（RelationType enum の .value で比較）
                     rel = self.state.relations.get(country_name, {}).get(ally_name)
-                    if str(rel).lower() != "alliance":
+                    if rel is None or rel.value != "alliance":
                         self.sys_logs_this_turn.append(
                             f"[{country_name} 核配備] {ally_name}は同盟国ではないため拒否"
                         )
@@ -417,9 +421,9 @@ class NuclearMixin:
         for country_name, country in self.state.countries.items():
             if country.nuclear_host_provider:
                 provider = country.nuclear_host_provider
-                # 同盟関係チェック
+                # 同盟関係チェック（RelationType enum の .value で比較）
                 rel = self.state.relations.get(country_name, {}).get(provider)
-                if str(rel).lower() != "alliance":
+                if rel is None or rel.value != "alliance":
                     # 同盟が破棄された → 核配備自動撤去
                     provider_country = self.state.countries.get(provider)
                     returned = country.nuclear_hosted_warheads
