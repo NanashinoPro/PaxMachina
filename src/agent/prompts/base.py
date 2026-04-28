@@ -53,8 +53,6 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
         if country_state.nuclear_dev_step in (1, 2, 3):
             progress = (country_state.nuclear_dev_invested / max(1.0, country_state.nuclear_dev_target)) * 100
             my_info += f"開発進捗: {country_state.nuclear_dev_invested:.1f}/{country_state.nuclear_dev_target:.1f} ({progress:.0f}%)\n"
-        if country_state.has_second_strike:
-            my_info += f"第二撃能力: ✅ 保有（SSBN/ICBM分散配備）\n"
         if country_state.nuclear_hosted_warheads > 0:
             my_info += f"他国配備核: {country_state.nuclear_host_provider}から{country_state.nuclear_hosted_warheads}発配備中\n"
         my_info += "\n"
@@ -207,8 +205,6 @@ def build_common_context(country_name: str, country_state: CountryState, world_s
             nuke_info = ""
             if p_state.nuclear_warheads > 0:
                 nuke_info = f", ☢️核弾頭={p_state.nuclear_warheads}発"
-                if p_state.has_second_strike:
-                    nuke_info += "(第二撃能力あり)"
             elif p_state.nuclear_dev_step > 0 and p_state.nuclear_dev_step < 4:
                 dev_names = {1: "濃縮中", 2: "実験段階", 3: "配備中"}
                 nuke_info = f", ☢️核開発={dev_names.get(p_state.nuclear_dev_step, '?')}"

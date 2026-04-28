@@ -859,10 +859,11 @@ class AgentSystem:
         # --- v1-3: 核兵器フラグを仮想DiplomaticActionに変換（engine/nuclear.pyで解釈） ---
         launch_tactical = major_dipl_dict.get("launch_tactical_nuclear")
         if launch_tactical:
-            nuke_key = f"__NUCLEAR_TACTICAL__{launch_tactical}"
+            tac_count = major_dipl_dict.get("tactical_nuclear_count", 1)
+            nuke_key = f"__NUCLEAR_TACTICAL__{launch_tactical}:{tac_count}"
             merged[nuke_key] = DiplomaticAction(
                 target_country=nuke_key,
-                reason=f"戦術核使用: {launch_tactical}"
+                reason=f"戦術核使用: {launch_tactical} ({tac_count}発)"
             )
 
         launch_strategic = major_dipl_dict.get("launch_strategic_nuclear")

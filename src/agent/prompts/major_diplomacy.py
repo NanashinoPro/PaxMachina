@@ -57,7 +57,6 @@ def build_major_diplomacy_prompt(
         nuclear_info = f"""
 【☢️ 核兵器状況】
 自国核弾頭: {country_state.nuclear_warheads}発
-第二撃能力: {"あり" if country_state.has_second_strike else "なし"}
 """
     elif country_state.nuclear_hosted_warheads > 0:
         nuclear_info = f"""
@@ -86,8 +85,8 @@ def build_major_diplomacy_prompt(
 - 降伏勧告/受諾（demand_surrender / accept_surrender）
 - 海峡封鎖宣言（declare_strait_blockade: "海峡名"）
 - 海峡封鎖解除（resolve_strait_blockade: "海峡名"）
-- ☢️ 戦術核使用（launch_tactical_nuclear: "対象国名"）— 交戦中のみ。前線の敵軍事力に大ダメージ。弾頭1発消費。
-- ☢️ 戦略核使用（launch_strategic_nuclear: "対象国名"）— 交戦中のみ。敵の経済・人口・軍事に壊滅的ダメージ。弾頭5発消費。
+- ☢️ 戦術核使用（launch_tactical_nuclear: "対象国名", tactical_nuclear_count: 数値）— 交戦中のみ。前線の敵軍事力に大ダメージ。弾頭数は1〜保有数の範囲で指定。多いほど威力大。
+- ☢️ 戦略核使用（launch_strategic_nuclear: "対象国名", strategic_nuclear_count: 数値）— 交戦中のみ。敵の経済・人口・軍事に壊滅的ダメージ。弾頭数を指定。
 - ☢️ 同盟国への核配備（deploy_nuclear_to_ally: "同盟国名", deploy_nuclear_count: 数値）
 - ☢️ 自国領土の他国核撤去（remove_hosted_nuclear: true）
 
@@ -118,6 +117,7 @@ def build_major_diplomacy_prompt(
   "declare_strait_blockade": null,
   "resolve_strait_blockade": null,
   "launch_tactical_nuclear": null,
+  "tactical_nuclear_count": 1,
   "launch_strategic_nuclear": null,
   "strategic_nuclear_count": 5,
   "deploy_nuclear_to_ally": null,

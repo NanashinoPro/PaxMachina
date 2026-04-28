@@ -131,10 +131,6 @@ class CountryState(BaseModel):
         0.0, ge=0.0,
         description="現在の開発段階の目標投資額（economy × gdp_ratio × turns で自動算出）"
     )
-    has_second_strike: bool = Field(
-        False,
-        description="第二撃能力の有無（SSBN/ICBM分散配備）。核保有国の中でも高度な能力。"
-    )
     nuclear_host_provider: Optional[str] = Field(
         None,
         description=(

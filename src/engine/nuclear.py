@@ -152,6 +152,7 @@ class NuclearMixin:
             # major_diplomatic_actions内のP-02結果から核使用フラグを取得
             # （_merge_allで格納された情報を参照）
             launch_tactical = None
+            tactical_count = 1
             launch_strategic = None
             strategic_count = NUCLEAR_STRATEGIC_DEFAULT_WARHEADS
 
@@ -159,7 +160,13 @@ class NuclearMixin:
             for dp in action.diplomatic_policies:
                 tc = dp.target_country
                 if tc.startswith("__NUCLEAR_TACTICAL__"):
-                    launch_tactical = tc.replace("__NUCLEAR_TACTICAL__", "")
+                    parts = tc.replace("__NUCLEAR_TACTICAL__", "").split(":")
+                    launch_tactical = parts[0]
+                    if len(parts) > 1:
+                        try:
+                            tactical_count = int(parts[1])
+                        except ValueError:
+                            pass
                 elif tc.startswith("__NUCLEAR_STRATEGIC__"):
                     parts = tc.replace("__NUCLEAR_STRATEGIC__", "").split(":")
                     launch_strategic = parts[0]
@@ -171,16 +178,21 @@ class NuclearMixin:
 
             # 戦術核使用
             if launch_tactical and country.nuclear_warheads >= 1:
-                self._execute_tactical_nuclear(country_name, country, launch_tactical)
+                self._execute_tactical_nuclear(country_name, country, launch_tactical, tactical_count)
 
             # 戦略核使用
             if launch_strategic and country.nuclear_warheads >= strategic_count:
                 self._execute_strategic_nuclear(country_name, country, launch_strategic, strategic_count)
 
-    def _execute_tactical_nuclear(self, attacker_name: str, attacker, target_name: str):
-        """戦術核の実行: 前線投入中の敵軍事力に大ダメージ"""
+    def _execute_tactical_nuclear(self, attacker_name: str, attacker, target_name: str, warheads_count: int = 1):
+        """戦術核の実行: 前線投入中の敵軍事力に大ダメージ（弾頭数指定可能）"""
         target = self.state.countries.get(target_name)
         if not target:
+            return
+
+        # 使用弾頭数を保有数以内に制限
+        warheads_count = min(warheads_count, attacker.nuclear_warheads)
+        if warheads_count <= 0:
             return
 
         # 交戦中か確認
@@ -204,32 +216,45 @@ class NuclearMixin:
             commitment = war.defender_commitment_ratio
 
         # ABM迎撃判定
-        intercepted = self._calculate_abm_intercept(target, 1)
-        if intercepted >= 1:
-            attacker.nuclear_warheads -= 1
+        intercepted = self._calculate_abm_intercept(target, warheads_count)
+        effective_warheads = warheads_count - intercepted
+
+        if intercepted > 0:
             self.log_event(
-                f"🛡️☢️ 【核弾頭迎撃成功】{target_name}のミサイル防衛システムが"
-                f"{attacker_name}の戦術核弾頭を撃墜！",
+                f"🛡️☢️ 【ミサイル防衛作動】{target_name}のABMシステムが"
+                f"{intercepted}/{warheads_count}発の戦術核弾頭を迎撃！",
+                involved_countries=[attacker_name, target_name, "global"]
+            )
+
+        if effective_warheads <= 0:
+            attacker.nuclear_warheads -= warheads_count
+            self.log_event(
+                f"🛡️ 【全弾迎撃成功】{target_name}が{attacker_name}の戦術核攻撃を完全に阻止！",
                 involved_countries=[attacker_name, target_name, "global"]
             )
             return
 
-        # ダメージ計算: 前線軍事力 × 投入率 × 25%
-        warheads_used = min(1, attacker.nuclear_warheads)
-        damage = target.military * commitment * NUCLEAR_TACTICAL_DAMAGE_RATIO * warheads_used
+        # ダメージ計算: 前線軍事力 × 投入率 × 25% × 弾頭数（対数スケーリング）
+        # 弾頭数が増えるほどダメージは増加するが、対数的に逓減
+        warhead_multiplier = math.log2(effective_warheads + 1)
+        damage = target.military * commitment * NUCLEAR_TACTICAL_DAMAGE_RATIO * warhead_multiplier
         damage = min(damage, target.military * NUCLEAR_MAX_MIL_DAMAGE_RATIO)
 
         target.military = max(0.0, target.military - damage)
-        attacker.nuclear_warheads -= warheads_used
+        attacker.nuclear_warheads -= warheads_count
 
         self.log_event(
-            f"☢️💥 【戦術核使用】{attacker_name}が{target_name}の前線軍事拠点に戦術核を使用！"
-            f"（軍事力ダメージ: -{damage:.1f}、残存: {target.military:.1f}、消費弾頭: {warheads_used}発）",
+            f"☢️💥 【戦術核使用】{attacker_name}が{target_name}の前線軍事拠点に"
+            f"戦術核{effective_warheads}発を使用！"
+            f"（軍事力ダメージ: -{damage:.1f}、残存: {target.military:.1f}、"
+            f"消費弾頭: {warheads_count}発、迎撃: {intercepted}発）",
             involved_countries=[attacker_name, target_name, "global"]
         )
         self.sys_logs_this_turn.append(
-            f"[{attacker_name} 戦術核] 対{target_name}: 軍事ダメージ {damage:.1f} "
-            f"(前線軍事力 {target.military + damage:.1f} × 投入率 {commitment:.0%} × {NUCLEAR_TACTICAL_DAMAGE_RATIO})"
+            f"[{attacker_name} 戦術核] 対{target_name}: {warheads_count}発使用(迎撃{intercepted}) "
+            f"軍事ダメージ {damage:.1f} "
+            f"(前線軍事力 {target.military + damage:.1f} × 投入率 {commitment:.0%} × "
+            f"{NUCLEAR_TACTICAL_DAMAGE_RATIO} × log2({effective_warheads}+1))"
         )
 
     def _execute_strategic_nuclear(self, attacker_name: str, attacker, target_name: str, warheads_count: int):

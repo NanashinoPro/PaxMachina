@@ -1,7 +1,7 @@
-name,government_type,ideology,economy,military,intelligence_level,area,approval_rating,turns_until_election,rebellion_risk,press_freedom,human_capital_index,mean_years_schooling,population,capital_lat,capital_lon,has_dissolution_power,nuclear_warheads,nuclear_dev_step,has_second_strike,nuclear_host_provider,nuclear_hosted_warheads
-北朝鮮,authoritarian,,40.0,28.0,35.0,120538.0,100,,,0.04,0.01,6.1,26.5,39.01,125.75,,50,4,false,,0
-韓国,democracy,,1800.0,47.0,60.0,100210.0,30.0,8,,0.05,0.52,12.4,51.7,37.57,126.98,false,0,0,false,,0
-中国,authoritarian,,19500.0,250.0,110.0,9596960.0,90,,,0.02,0.12,7.6,1409.0,39.90,116.40,,500,4,true,,0
-ロシア,authoritarian,,2100.0,170.0,90.0,17098242.0,80,,,0.06,0.05,12.0,146.0,55.75,37.62,,6255,4,true,,0
-日本,democracy,,4200.0,55.0,55.0,377975.0,43.0,14,,0.55,3.500,13.4,124.0,35.68,139.69,true,0,0,false,,0
-アメリカ,democracy,,29500.0,930.0,120.0,9833520.0,40.0,12,,0.65,3.774,13.7,335.0,38.90,-77.04,false,5550,4,true,,0
+name,government_type,ideology,economy,military,intelligence_level,area,approval_rating,turns_until_election,rebellion_risk,press_freedom,human_capital_index,mean_years_schooling,population,capital_lat,capital_lon,has_dissolution_power,nuclear_warheads,nuclear_dev_step,nuclear_host_provider,nuclear_hosted_warheads
+北朝鮮,authoritarian,,40.0,28.0,35.0,120538.0,100,,,0.04,0.01,6.1,26.5,39.01,125.75,,50,4,,0
+韓国,democracy,,1800.0,47.0,60.0,100210.0,30.0,8,,0.05,0.52,12.4,51.7,37.57,126.98,false,0,0,,0
+中国,authoritarian,,19500.0,250.0,110.0,9596960.0,90,,,0.02,0.12,7.6,1409.0,39.90,116.40,,500,4,,0
+ロシア,authoritarian,,2100.0,170.0,90.0,17098242.0,80,,,0.06,0.05,12.0,146.0,55.75,37.62,,6255,4,,0
+日本,democracy,,4200.0,55.0,55.0,377975.0,43.0,14,,0.55,3.500,13.4,124.0,35.68,139.69,true,0,0,,0
+アメリカ,democracy,,29500.0,930.0,120.0,9833520.0,40.0,12,,0.65,3.774,13.7,335.0,38.90,-77.04,false,5550,4,,0

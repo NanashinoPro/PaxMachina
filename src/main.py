@@ -65,7 +65,6 @@ def initialize_world(data_dir: str = None) -> WorldState:
                 # v1-3: 核兵器パラメータ（CSVから読み込む）
                 nuclear_warheads=int(_safe_float(row.get("nuclear_warheads"), 0)),
                 nuclear_dev_step=int(_safe_float(row.get("nuclear_dev_step"), 0)),
-                has_second_strike=row.get("has_second_strike", "").strip().lower() == "true",
                 nuclear_host_provider=row.get("nuclear_host_provider", "").strip() or None,
                 nuclear_hosted_warheads=int(_safe_float(row.get("nuclear_hosted_warheads"), 0)),
             )
