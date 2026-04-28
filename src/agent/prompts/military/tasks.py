@@ -50,7 +50,8 @@ def build_military_invest_prompt(
 - 大きな経済負担を伴うため、戦略的必要性を十分に検討すること。
 
 【☢️ 核使用の提言（nuclear_use_recommendation）】
-- 交戦中の場合のみ。大統領への助言として核使用を提言可能。
+- 大統領への助言として核使用を提言可能。最終決定権は大統領にある。
+- 交戦中の敵国だけでなく、先制核攻撃（自動宣戦布告を伴う）の提言も可能。
 - 形式: "tactical:対象国名" or "strategic:対象国名" or null
 
 施政方針（{policy.stance}）に従い、reasoning_for_military_investmentで算出プロセスを説明した上で投資額を決定してください。

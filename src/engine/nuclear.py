@@ -199,8 +199,9 @@ class NuclearMixin:
         if warheads_count <= 0:
             return
 
-        # 交戦中か確認
+        # 交戦中か確認（先制核攻撃対応）
         war = None
+        is_first_strike = False
         for w in self.state.active_wars:
             if (w.aggressor == attacker_name and w.defender == target_name) or \
                (w.aggressor == target_name and w.defender == attacker_name):
@@ -208,13 +209,31 @@ class NuclearMixin:
                 break
 
         if not war:
-            self.sys_logs_this_turn.append(
-                f"[{attacker_name} 戦術核] {target_name}と交戦中ではないため不発"
+            # 先制核攻撃: 自動宣戦布告を発生させる
+            is_first_strike = True
+            from .constants import DEFAULT_AGGRESSOR_COMMITMENT, DEFAULT_DEFENDER_COMMITMENT
+            war = WarState(
+                aggressor=attacker_name, defender=target_name,
+                aggressor_commitment_ratio=DEFAULT_AGGRESSOR_COMMITMENT,
+                defender_commitment_ratio=DEFAULT_DEFENDER_COMMITMENT
             )
-            return
+            self.state.active_wars.append(war)
+            # 外交関係を戦争状態に更新
+            from models import RelationType
+            self._update_relation(attacker_name, target_name, RelationType.AT_WAR)
+            self.log_event(
+                f"☢️⚡ 【核先制攻撃 → 自動宣戦布告】{attacker_name}が{target_name}に対し"
+                f"核兵器による先制攻撃を開始！戦争状態に突入しました！",
+                involved_countries=[attacker_name, target_name, "global"]
+            )
+            self.sys_logs_this_turn.append(
+                f"[{attacker_name} 核先制攻撃] {target_name}への先制核攻撃により自動宣戦布告"
+            )
 
-        # 敵の投入率を取得
-        if war.aggressor == target_name:
+        # 敵の投入率を取得（先制攻撃時は奇襲効果: commitment=1.0）
+        if is_first_strike:
+            commitment = 1.0  # 奇襲: 相手は全軍が無防備
+        elif war.aggressor == target_name:
             commitment = war.aggressor_commitment_ratio
         else:
             commitment = war.defender_commitment_ratio
@@ -267,17 +286,31 @@ class NuclearMixin:
         if not target:
             return
 
-        # 交戦中か確認
+        # 交戦中か確認（先制核攻撃対応）
         is_at_war = any(
             (w.aggressor == attacker_name and w.defender == target_name) or
             (w.aggressor == target_name and w.defender == attacker_name)
             for w in self.state.active_wars
         )
         if not is_at_war:
-            self.sys_logs_this_turn.append(
-                f"[{attacker_name} 戦略核] {target_name}と交戦中ではないため不発"
+            # 先制戦略核攻撃: 自動宣戦布告
+            from .constants import DEFAULT_AGGRESSOR_COMMITMENT, DEFAULT_DEFENDER_COMMITMENT
+            war = WarState(
+                aggressor=attacker_name, defender=target_name,
+                aggressor_commitment_ratio=DEFAULT_AGGRESSOR_COMMITMENT,
+                defender_commitment_ratio=DEFAULT_DEFENDER_COMMITMENT
             )
-            return
+            self.state.active_wars.append(war)
+            from models import RelationType
+            self._update_relation(attacker_name, target_name, RelationType.AT_WAR)
+            self.log_event(
+                f"☢️⚡ 【戦略核先制攻撃 → 自動宣戦布告】{attacker_name}が{target_name}に対し"
+                f"戦略核兵器による先制攻撃を開始！全面戦争に突入しました！",
+                involved_countries=[attacker_name, target_name, "global"]
+            )
+            self.sys_logs_this_turn.append(
+                f"[{attacker_name} 戦略核先制攻撃] {target_name}への先制核攻撃により自動宣戦布告"
+            )
 
         actual_warheads = min(warheads_count, attacker.nuclear_warheads)
 

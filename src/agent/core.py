@@ -532,6 +532,13 @@ class AgentSystem:
             nuke_rec = d.get("nuclear_use_recommendation")
             if nuke_rec:
                 self.logger.sys_log(f"[{country_name}:M-01] 核使用提言: {nuke_rec}")
+                # hidden_plansに保存 → 次ターンのP-02で大統領に伝わる
+                old_plans = country_state.hidden_plans or ""
+                # 古い提言を削除して新しいものに置換
+                import re
+                old_plans = re.sub(r'\[M-01核使用提言\][^\[]*', '', old_plans)
+                country_state.hidden_plans = old_plans.strip() + f" [M-01核使用提言] {nuke_rec}"
+                result["nuclear_use_recommendation"] = nuke_rec
         except Exception as e:
             self.logger.sys_log(f"[{country_name}:M-01] エラー: {e}", "ERROR")
 

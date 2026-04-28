@@ -54,9 +54,16 @@ def build_major_diplomacy_prompt(
     # 核兵器状況（v1-3追加）
     nuclear_info = ""
     if country_state.nuclear_warheads > 0:
+        # hidden_plansからM-01の核使用提言を抽出
+        nuke_recommendation = ""
+        if country_state.hidden_plans and "[M-01核使用提言]" in country_state.hidden_plans:
+            import re
+            match = re.search(r'\[M-01核使用提言\](.+?)(?:\[|$)', country_state.hidden_plans)
+            if match:
+                nuke_recommendation = f"\n※ 前回の軍事担当官からの提言: {match.group(1).strip()}"
         nuclear_info = f"""
 【☢️ 核兵器状況】
-自国核弾頭: {country_state.nuclear_warheads}発
+自国核弾頭: {country_state.nuclear_warheads}発{nuke_recommendation}
 """
     elif country_state.nuclear_hosted_warheads > 0:
         nuclear_info = f"""
@@ -88,8 +95,10 @@ def build_major_diplomacy_prompt(
 - 降伏勧告/受諾（demand_surrender / accept_surrender）
 - 海峡封鎖宣言（declare_strait_blockade: "海峡名"）
 - 海峡封鎖解除（resolve_strait_blockade: "海峡名"）
-- ☢️ 戦術核使用（launch_tactical_nuclear: "対象国名", tactical_nuclear_count: 数値）— 交戦中のみ。前線の敵軍事力に大ダメージ。弾頭数は1〜保有数の範囲で指定。
-- ☢️ 戦略核使用（launch_strategic_nuclear: "対象国名", strategic_nuclear_count: 数値）— 交戦中のみ。敵の経済・人口・軍事に壊滅的ダメージ。弾頭数を指定。
+- ☢️ 戦術核使用（launch_tactical_nuclear: "対象国名", tactical_nuclear_count: 数値）— 前線の敵軍事力に大ダメージ。弾頭数は1〜保有数の範囲で指定。
+- ☢️ 戦略核使用（launch_strategic_nuclear: "対象国名", strategic_nuclear_count: 数値）— 敵の経済・人口・軍事に壊滅的ダメージ。弾頭数を指定。
+  ※ 交戦中でない場合でも使用可能（先制核攻撃）。先制攻撃の場合、自動的に宣戦布告が発生します。
+  ※ 先制核攻撃は国際社会からの極めて強い非難を招きます。戦略的必然性がある場合のみ決断してください。
 - ☢️ 同盟国への核配備（deploy_nuclear_to_ally: "同盟国名", deploy_nuclear_count: 数値）
 - ☢️ 自国領土の他国核撤去（remove_hosted_nuclear: true）
 
@@ -111,7 +120,8 @@ def build_major_diplomacy_prompt(
 
 【ルール】
 - 不要なアクションは出力しない（何もしない場合は major_diplomatic_actions: []）
-- 核使用は交戦中の敵国にのみ可能。保有弾頭数が足りない場合は使用不可。
+- 核使用は敵国にのみ可能。保有弾頭数が足りない場合は使用不可。
+- 先制核攻撃は自動的に宣戦布告を伴う。事実上の戦争開始と同義。
 - 海峡封鎖は自国が資格を持つ場合のみ（イラン→ホルムズ海峡、アメリカ→ホルムズ海峡等）
 - 施政方針に従い、合理的な判断のみ行う
 
