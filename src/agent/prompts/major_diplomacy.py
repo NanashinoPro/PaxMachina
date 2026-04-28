@@ -85,10 +85,26 @@ def build_major_diplomacy_prompt(
 - 降伏勧告/受諾（demand_surrender / accept_surrender）
 - 海峡封鎖宣言（declare_strait_blockade: "海峡名"）
 - 海峡封鎖解除（resolve_strait_blockade: "海峡名"）
-- ☢️ 戦術核使用（launch_tactical_nuclear: "対象国名", tactical_nuclear_count: 数値）— 交戦中のみ。前線の敵軍事力に大ダメージ。弾頭数は1〜保有数の範囲で指定。多いほど威力大。
+- ☢️ 戦術核使用（launch_tactical_nuclear: "対象国名", tactical_nuclear_count: 数値）— 交戦中のみ。前線の敵軍事力に大ダメージ。弾頭数は1〜保有数の範囲で指定。
 - ☢️ 戦略核使用（launch_strategic_nuclear: "対象国名", strategic_nuclear_count: 数値）— 交戦中のみ。敵の経済・人口・軍事に壊滅的ダメージ。弾頭数を指定。
 - ☢️ 同盟国への核配備（deploy_nuclear_to_ally: "同盟国名", deploy_nuclear_count: 数値）
 - ☢️ 自国領土の他国核撤去（remove_hosted_nuclear: true）
+
+【☢️ 核兵器の威力目安】
+■ 戦術核（前線軍事力への攻撃）:
+  ダメージ = 敵軍事力 × 敵投入率 × 25% × log2(着弾弾頭数+1)
+  - 1発着弾 → 敵前線軍事力の約25%を破壊
+  - 3発着弾 → 約50%を破壊（2倍の威力）
+  - 7発着弾 → 約75%を破壊（3倍の威力）
+  ※ 敵のミサイル防衛（ABM）により一部が迎撃される可能性あり。
+  ※ 軍事力が大きい敵ほどABM迎撃率が高い。
+
+■ 戦略核（経済・人口・軍事への壊滅攻撃）:
+  弾頭数が多いほど壊滅度が増加（対数スケーリング）。
+  - 5発着弾 → 経済約-15%, 人口約-10%, 軍事約-20%
+  - 15発着弾 → 経済約-30%, 人口約-20%, 軍事約-20%
+  - 50発以上 → 国家機能の大部分を破壊
+  ※ 戦略核もABMにより迎撃される可能性あり。
 
 【ルール】
 - 不要なアクションは出力しない（何もしない場合は major_diplomatic_actions: []）
