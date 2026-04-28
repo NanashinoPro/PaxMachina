@@ -64,6 +64,9 @@ def build_major_diplomacy_prompt(
 {country_state.nuclear_host_provider}から{country_state.nuclear_hosted_warheads}発が配備中
 """
 
+    # JSONスキーマの例示用ターゲット国名（自国以外の最初の国）
+    example_target = next((n for n in world_state.countries if n != country_name), "相手国名")
+
     return ctx + f"""
 【🏛️ 大統領施政方針 ({stance})】
 {directives_str}
