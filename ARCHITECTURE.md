@@ -1,7 +1,7 @@
 # AI外交シミュレーション — アーキテクチャ仕様書
 
-> **最終更新**: 2026-04-25  
-> **対象ブランチ**: master / v1-2 / v2  
+> **最終更新**: 2026-04-29  
+> **対象ブランチ**: master / v1-2 / v1-3 / v2  
 > **このドキュメントだけで本システムを再実装できることを目標とする。**
 
 ---
@@ -45,8 +45,11 @@
 │   │           └── tasks.py          # D-01〜08: 外交全タスク
 │   └── engine/
 │       ├── core.py           # SimulationEngine: 世界ルール適用
+│       ├── constants.py      # 全定数（TURNS_PER_YEAR, 信用スプレッド等）
 │       ├── diplomacy.py      # 外交・諜報処理
-│       ├── economy.py        # 経済計算
+│       ├── domestic.py       # 内政・マクロ経済モデル
+│       ├── economy.py        # 貿易・関税計算
+│       ├── nuclear.py        # 核兵器システム(v1-3)
 │       └── energy.py         # エネルギー備蓄・ホルムズ海峡(v1-2)
 ├── data/
 │   ├── initial_stats.csv     # 本番用初期国家データ
@@ -80,17 +83,21 @@ class CountryState(BaseModel):
     approval_rating: float                # 支持率(%)
     tax_rate: float                       # 税率(0.0〜1.0)
     tariff_rate: Dict[str, float]         # 国別関税率
-    national_debt: float                  # 国家債務
-    government_budget: float              # 政府予算(ターン毎再計算)
+    national_debt: float                  # 国家債務(B$)
+    government_budget: float              # 政府予算(ターン毎再計算, 利払い後の可処分額)
     press_freedom: float                  # 報道の自由度(0.0〜1.0)
     human_capital_index: float            # HCI
     mean_years_schooling: float           # 平均就学年数
-    # 投資配分（0.0〜1.0、合計≦1.0が理想）
+    # 投資配分（v1-3: 金額ベース(B$)。旧版は0.0〜1.0比率）
     invest_economy: float
     invest_military: float
     invest_welfare: float
     invest_education_science: float
     invest_intelligence: float
+    # 核兵器(v1-3)
+    nuclear_warheads: int                 # 保有核弾頭数
+    nuclear_development_step: int         # 核開発段階(0:未着手〜4:保有国)
+    nuclear_hosted_warheads: int          # 他国から配備された核弾頭数
     # 対外公表値（情報偽装用、Noneなら真値を公開）
     reported_economy: Optional[float]
     reported_military: Optional[float]
@@ -205,24 +212,30 @@ class PresidentPolicy(BaseModel):
 |---------|--------------|------|
 | I-01 | `tax_rate` | 税率決定（0.10〜0.70、変動上限±10%pt） |
 | I-02 | `tariff_rate` | 国別関税率（0.0〜1.0） |
-| I-03 | `invest_economy` | 経済投資配分（0.0〜1.0） |
-| I-04 | `invest_welfare` | 福祉投資配分 |
-| I-05 | `invest_education_science` | 教育・科学投資配分 |
+| I-03 | `invest_economy` | 経済投資要求（金額B$） |
+| I-04 | `invest_welfare` | 福祉投資要求（金額B$） |
+| I-05 | `invest_education_science` | 教育・科学投資要求（金額B$） |
 | I-06 | `target_press_freedom` | 報道の自由度（0.0〜1.0） |
 | I-07 | `report_*`, `deception_reason` | 対外公表値偽装（null=真値公開） |
 | I-08 | `dissolve_parliament` | 議会解散判断（民主主義のみ） |
 
-#### Phase 1B: 予算正規化
-- 全投資配分（I-03〜05 + M-01 + M-02）の合計が1.0超の場合、Pro/Flashで按分正規化
+#### Phase 1E: 予算配分（B-01）
+- 各タスクエージェント（I-03〜05, M-01, M-02）から**金額(B$)ベース**の要求を受領
+- B-01（Flash-lite）が歳入と要求を比較し、最終配分を決定
+- 歳入不足時は赤字国債発行を判断（発行額も金額ベースで指定）
+- 赤字国債 → `national_debt` に加算、金利計算に反映
 
 #### Phase 1C: 軍事・諜報タスク
 | タスクID | モデル | 出力フィールド |
 |---------|-------|--------------|
-| M-01 | Flash | `invest_military`、`reasoning_for_military_investment` |
-| M-02 | Flash-lite | `invest_intelligence` |
+| M-01 | Flash | `request_military`(B$)、`request_nuclear`(B$)、`nuclear_use_recommendation` |
+| M-02 | Flash-lite | `request_intelligence`(B$) |
 | M-03 | Flash | `war_commitment_ratios`（交戦中のみ） |
 | M-04 | Flash-lite | `espionage_gather_intel`（対全相手国） |
 | M-05 | Flash | `espionage_sabotage`（対全相手国） |
+
+> **M-01の核使用提言**: `nuclear_use_recommendation`（"tactical:対象国名" or "strategic:対象国名" or null）
+> M-01が提言した場合、`hidden_plans`に`[M-01核使用提言]`として保存され、次ターンのP-02で大統領に表示される。
 
 #### Phase 1D: 外交タスク
 | タスクID | モデル | 内容 |
@@ -236,10 +249,13 @@ class PresidentPolicy(BaseModel):
 | D-07 | Flash-lite | 援助受入率の設定（0.0=拒否〜1.0=全額） |
 | D-08 | Flash | パワーバキューム入札 |
 
-#### Phase 2: 重大外交（B-01）
+#### Phase 2: 重大外交（P-02）
 | タスクID | モデル | 内容 |
 |---------|-------|------|
-| B-01 | Pro | 宣戦/同盟提案/停戦/合併/降伏（対全相手国） |
+| P-02 | Flash | 宣戦/同盟提案/停戦/合併/降伏/☢️核使用/海峡封鎖（対全相手国） |
+
+> **先制核攻撃**: P-02は交戦中でなくても`launch_tactical_nuclear`/`launch_strategic_nuclear`を発行可能。
+> 先制攻撃の場合、エンジン側で自動的にWarState作成＋RelationType.AT_WARに更新される。
 
 ### 3-2. プロンプト設計原則
 
@@ -264,28 +280,84 @@ class PresidentPolicy(BaseModel):
 
 ## 4. シミュレーションエンジン（src/engine/）
 
-### 4-1. process_turn()の処理順序
-1. 全国家の投資配分を正規化（合計が1.0超の場合）
-2. 税収・関税収入から国家予算を計算（債務利子 1%/ターン差引）
-3. 経済成長計算（HCI乗数・投資効果・隣国交易）
-4. 軍事力更新（invest_military × budget × growth_factor）
+### 4-1. ターン時間軸パラメータ
+```python
+TURNS_PER_YEAR = 4  # 1ターン = 四半期（変更可能）
+```
+年間GDPをストック量として保持し、税収・利払い等のフロー量は `/TURNS_PER_YEAR` で四半期化する。
+
+### 4-2. process_turn()の処理順序
+1. **基礎予算の算出**: 税収(年間GDP×税率/TURNS_PER_YEAR) + 関税収入 - 利払い
+2. 全国家の投資配分を正規化（金額ベースで歳入超過時は按分）
+3. 経済成長計算（SNAモデル: Y = C + I + G + NX）
+4. 軍事力更新（リチャードソン軍備競争モデル）
 5. 諜報力更新
 6. 支持率更新（税率・経済成長・福祉投資・HCIの関数）
 7. HCI更新（教育投資・就学年数の関数）
 8. 外交処理（制裁・貿易・援助・依存度更新）
-9. 軍事衝突判定（リチャードソンモデル）
-10. 諜報処理（収集成功/失敗・破壊工作）
-11. 選挙・クーデター・反乱処理
-12. 自然災害・技術革新イベント生成（乱数）
-13. ニュースイベントリストに全結果を追記
+9. 軍事衝突判定
+10. 核兵器処理（開発進行・量産・使用・先制攻撃）
+11. 諜報処理（収集成功/失敗・破壊工作）
+12. 選挙・クーデター・反乱処理
+13. 自然災害・技術革新イベント生成（乱数）
+14. ニュースイベントリストに全結果を追記
 
-### 4-2. 経済モデル
-```
-GDP成長率 = base_rate + invest_economy × budget_multiplier + hci_bonus + trade_bonus - tax_drag
-政府予算  = economy × tax_rate + tariff_revenue - national_debt × 0.01
+### 4-3. 財政モデル（v1-3）
+
+#### 税収（四半期化）
+```python
+tax_revenue_per_turn = (economy * tax_rate) / TURNS_PER_YEAR
 ```
 
-### 4-3. 軍事衝突モデル（リチャードソン軍備競争）
+#### 信用スプレッドモデル（Harvard研究準拠）
+```python
+# 定数（全て年率で定義）
+DEBT_INTEREST_RATE_ANNUAL = 0.025    # 基本金利 2.5%/年
+DEBT_SPREAD_THRESHOLD = 0.90         # 閾値: 債務GDP比90%
+DEBT_SPREAD_SENSITIVITY = 0.006      # 感度: 10%pt超過で+60bp/年
+DEBT_SPREAD_CAP_ANNUAL = 0.15        # 上限: 年率15%（ギリシャ危機級）
+
+# 計算
+debt_ratio = national_debt / GDP
+if debt_ratio > 0.90:
+    spread = min((debt_ratio - 0.90) * 0.006, 0.15)
+    effective_rate = (0.025 + spread) / TURNS_PER_YEAR
+else:
+    effective_rate = 0.025 / TURNS_PER_YEAR
+
+interest_payment = national_debt * effective_rate
+government_budget = max(0, tax_revenue + tariff_revenue - interest_payment)
+```
+
+**学術的根拠**:
+- Harvard研究 (Reinhart et al.): 先進国で債務GDP比10%pt増 → +6bp/年
+- シミュレーション加速のため実証値の10倍の感度（+60bp/年）を使用
+- 日本(GDP比260%超)で実効金利≈3.4%/年（現実の10年債利回り2.47%/年に近似）
+
+#### 赤字国債モデル
+- B-01が歳入不足と判断した場合、赤字国債を発行
+- 発行額は`national_debt`に加算
+- 次ターンから利払い対象に含まれる（動的金利モデル適用）
+
+#### デフォルト処理
+```python
+if total_revenue < interest_payment:
+    government_budget = 0.0
+    national_debt += (interest_payment - total_revenue)  # 未払い利息の元本組み込み
+```
+
+### 4-4. 経済成長モデル（SNAベース: Y = C + I + G + NX）
+```
+C = (GDP - 税収) × (1 - 貯蓄率)              # ケインズ型消費関数
+I = 民間貯蓄 × 0.95 + 政府経済投資 × クラウドイン - 軍事投資 × クラウドアウト
+G = 政府支出合計（予算 × 投資配分 × 政策実行力）
+NX = 純輸出（重力モデルで計算）
+新GDP = (C + I + G) × HCI乗数 × (1 + 内生的成長) + NX
+```
+
+GDP成長率フロア: 四半期あたり-5%（Álvarez-Pereira et al. 2022）
+
+### 4-5. 軍事衝突モデル（リチャードソン軍備競争）
 ```
 attack_power = military × commitment_ratio × (1 + tech_bonus)
 defense_power = military × commitment_ratio × (1 + hci_bonus)
@@ -294,7 +366,37 @@ elif defense_power > attack_power × 1.2: 逆転占領
 occupation_progress += delta  # 100%到達で征服
 ```
 
-### 4-4. エネルギー備蓄システム（v1-2のみ, src/engine/energy.py）
+### 4-6. 核兵器システム（v1-3, src/engine/nuclear.py）
+
+#### 核開発フロー
+| Step | 名称 | 条件 |
+|------|------|------|
+| 0 | 未着手 | - |
+| 1 | ウラン濃縮 | `request_nuclear > 0` で進行 |
+| 2 | 核実験成功 | 累積投資閾値到達 |
+| 3 | 実戦配備 | 累積投資閾値到達 |
+| 4 | 核保有国 | 弾頭量産可能 |
+
+#### 核弾頭量産
+- Step4到達後、`request_nuclear`予算で量産
+- **1四半期あたり最大50発**のキャップ
+- 製造コストは `national_warhead_cost` で国別設定
+- 製造コストは**政府予算(government_budget)から差し引き**
+
+#### 核使用（戦術核・戦略核）
+- **P-02（大統領）が最終決定**: `launch_tactical_nuclear` / `launch_strategic_nuclear`
+- **交戦中でなくても使用可能（先制核攻撃）**
+- 先制核攻撃時: 自動宣戦布告（WarState作成 + RelationType.AT_WAR）
+- 戦術核先制: 奇襲効果（commitment=1.0 → 相手全軍が無防備）
+
+#### M-01→P-02 核使用提言フロー
+```
+M-01: nuclear_use_recommendation → hidden_plansに[M-01核使用提言]を保存
+  ↓ (1ターン遅延)
+P-02: hidden_plansから提言を読み取り → 核使用の最終判断
+```
+
+### 4-7. エネルギー備蓄システム（v1-2以降, src/engine/energy.py）
 
 #### 備蓄計算
 ```
@@ -312,7 +414,7 @@ energy_reserve = max(0, energy_reserve - 1.0 + gain)
 
 #### ホルムズ海峡封鎖
 - `world_state.strait_blockade_active = True` で発動
-- タスクエージェントM-03の特殊ターゲット `__STRAIT_BLOCKADE__` で制御
+- P-02の`declare_strait_blockade`/`resolve_strait_blockade`で制御
 - 封鎖国はエネルギー収入が停止し、中東依存国に経済ペナルティが発生
 - `data/energy_import_sources.json` で各国の輸入依存先を定義
 
@@ -430,7 +532,8 @@ for _ in range(MAX_TURNS):
 | ブランチ | 用途 | 固有機能 |
 |---------|------|---------|
 | `master` | 本番安定版 | 基本シミュレーション |
-| `v1-2` (v1-2：海峡封鎖＋エネルギー枯渇シナリオ) | エネルギーシナリオ | ホルムズ海峡封鎖・エネルギー備蓄枯渇 |
+| `v1-2` | エネルギーシナリオ | ホルムズ海峡封鎖・エネルギー備蓄枯渇 |
+| `v1-3` | **核外交・財政改革** | 核兵器システム・金額ベース予算・信用スプレッド・赤字国債・先制核攻撃 |
 | `v2` | 実験的タスクエージェント制 | v1-2ベースに高度な意思決定ロジック |
 
 ---
@@ -460,6 +563,22 @@ if new_tax_rate >= 1.0:
     new_tax_rate /= 100.0
 ```
 この補正は `core.py` と `logger.py` の両方で実施。
+
+### 9-5. 核弾頭量産の暴走（v1-3で解決済み）
+核弾頭製造時に政府予算からコストが差し引かれていなかったため、無限量産が発生。
+→ 製造コストの予算差し引き + 1四半期50発キャップを導入（v1-3 / 2026-04-28）
+
+### 9-6. 税収の年間×4倍徴収バグ（v1-3で解決済み）
+1ターン=四半期なのに、税収を`GDP × tax_rate`（年間分）で毎ターン徴収していた。
+→ `(GDP × tax_rate) / TURNS_PER_YEAR` に修正（v1-3 / 2026-04-29）
+
+### 9-7. 信用スプレッドの過剰設定（v1-3で解決済み）
+旧モデル: 60%超で`(ratio-0.6)×5%/Q` → 日本で実効金利12.4%/Q（年率50%）。
+→ Harvard研究に基づく年率ベースモデルに再設計。日本で≈3.4%/年に修正（v1-3 / 2026-04-29）
+
+### 9-8. D-01/D-05 listエラー（未解決）
+`'list' object has no attribute 'get'` — LLMが外交メッセージを辞書ではなくリストで返すことがある。
+デフォルト値で継続するため致命的ではないが、外交メッセージが欠落する。
 
 ---
 
