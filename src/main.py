@@ -427,9 +427,13 @@ def main():
     else:
         print("--- 🌍 AI外交シミュレーション ---")
 
-    # シナリオ注入: T0開始前に初期イベントを実行
+    # シナリオ注入: 新規開始時のみ（resumeは既にシナリオ適用済みの状態を復元するため不要）
     if args.scenario:
-        _inject_scenario_events(engine, world_state, args.scenario, logger)
+        if args.resume:
+            logger.sys_log("[Scenario] --resume と --scenario の併用: シナリオ注入をスキップ（既に適用済みの状態から再開）")
+            print("⚠️  --resume 時はシナリオ注入をスキップします（復元済み状態に二重適用を防止）")
+        else:
+            _inject_scenario_events(engine, world_state, args.scenario, logger)
 
     # シミュレーションループ
     MAX_TURNS = args.turns
