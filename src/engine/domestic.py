@@ -104,7 +104,10 @@ class DomesticMixin:
 
         # --- 税率調整と政治的コスト（支持率ペナルティ） ---
         old_tax_rate = country.tax_rate
-        new_tax_rate = action.domestic_policy.tax_rate
+        try:
+            new_tax_rate = float(action.domestic_policy.tax_rate)
+        except (TypeError, ValueError):
+            new_tax_rate = old_tax_rate
         
         # 税率の異常値を弾く (0.1 ~ 0.7 の範囲内にクランプ)
         # 首脳AIが 15.0(%) のように整数で返してきた場合の補正ロジック
@@ -179,7 +182,10 @@ class DomesticMixin:
         # 税収T = GDP * 税率 (※前ターンのGDPをベースにする)
         # 報道の自由度の更新とペナルティ計算
         # 自由度を急激に制限（下げる）すると、国民の不満によって支持率が大きく下落する
-        target_freedom = getattr(action.domestic_policy, 'target_press_freedom', country.press_freedom)
+        try:
+            target_freedom = float(getattr(action.domestic_policy, 'target_press_freedom', country.press_freedom) or country.press_freedom)
+        except (TypeError, ValueError):
+            target_freedom = country.press_freedom
         freedom_diff = target_freedom - country.press_freedom
         
         if freedom_diff < -0.05:
@@ -199,12 +205,18 @@ class DomesticMixin:
         # 政府予算 (すでに対外援助等で引かれている額)
         budget = country.government_budget
         
-        # 経済投資
-        inv_econ = action.domestic_policy.invest_economy
-        inv_mil = action.domestic_policy.invest_military
-        inv_wel = action.domestic_policy.invest_welfare
-        inv_intel = getattr(action.domestic_policy, 'invest_intelligence', 0.0)
-        inv_edu = getattr(action.domestic_policy, 'invest_education_science', 0.0)
+        # 経済投資（LLMがstr型で返す場合の安全変換）
+        def _safe_float(val, default=0.0):
+            try:
+                return float(val if val is not None else default)
+            except (TypeError, ValueError):
+                return default
+        
+        inv_econ = _safe_float(action.domestic_policy.invest_economy, 0.25)
+        inv_mil = _safe_float(action.domestic_policy.invest_military, 0.25)
+        inv_wel = _safe_float(action.domestic_policy.invest_welfare, 0.25)
+        inv_intel = _safe_float(getattr(action.domestic_policy, 'invest_intelligence', 0.0))
+        inv_edu = _safe_float(getattr(action.domestic_policy, 'invest_education_science', 0.0))
         
         # 予算の総和を1.0に正規化（安全装置）
         total_inv = inv_econ + inv_mil + inv_wel + inv_intel + inv_edu

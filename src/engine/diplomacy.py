@@ -132,8 +132,11 @@ class DiplomacyMixin:
                     continue
 
                 # 登録/変更（aid_amount > 0 の場合のみ）
-                new_econ = getattr(dip, 'aid_amount_economy', 0.0)
-                new_mil  = getattr(dip, 'aid_amount_military', 0.0)
+                try:
+                    new_econ = float(getattr(dip, 'aid_amount_economy', 0.0) or 0.0)
+                    new_mil  = float(getattr(dip, 'aid_amount_military', 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    new_econ, new_mil = 0.0, 0.0
                 if new_econ > 0 or new_mil > 0:
                     existing = [
                         c for c in self.state.recurring_aid_contracts
@@ -266,7 +269,10 @@ class DiplomacyMixin:
             # target_countryは攻撃国（敵国）を指定。攻撃国との直接戦争は発生しない。
             if getattr(dip, 'join_ally_defense', False):
                 attacker_name = target_name  # target_country = 攻撃国（敵国）
-                support_commit = getattr(dip, 'defense_support_commitment', None) or 0.10
+                try:
+                    support_commit = float(getattr(dip, 'defense_support_commitment', None) or 0.10)
+                except (TypeError, ValueError):
+                    support_commit = 0.10
                 support_commit = max(0.01, min(0.50, support_commit))
                 
                 # 攻撃国が防衛側の戦争を検索（同盟制限なし）
@@ -316,7 +322,10 @@ class DiplomacyMixin:
             # 軍事侵攻比率の変更（交戦中の場合）— Rate Limiter適用
             if getattr(dip, 'war_commitment_ratio', None) is not None:
                 from .constants import MIN_COMMITMENT_RATIO, MAX_COMMITMENT_CHANGE_PER_TURN
-                new_ratio = max(MIN_COMMITMENT_RATIO, min(1.0, dip.war_commitment_ratio))
+                try:
+                    new_ratio = max(MIN_COMMITMENT_RATIO, min(1.0, float(dip.war_commitment_ratio)))
+                except (TypeError, ValueError):
+                    new_ratio = MIN_COMMITMENT_RATIO
                 for w in self.state.active_wars:
                     if w.aggressor == country_name and w.defender == target_name:
                         old_ratio = w.aggressor_commitment_ratio
@@ -684,7 +693,10 @@ class DiplomacyMixin:
                     
                 for dip in action.diplomatic_policies:
                     if dip.target_country == new_name:
-                        raw_bid = getattr(dip, 'vacuum_bid', 0.0)
+                        try:
+                            raw_bid = float(getattr(dip, 'vacuum_bid', 0.0) or 0.0)
+                        except (TypeError, ValueError):
+                            raw_bid = 0.0
                         if raw_bid <= 0:
                             continue
                         
@@ -802,7 +814,10 @@ class DiplomacyMixin:
                     
                 for dip in action.diplomatic_policies:
                     if dip.target_country == target_name:
-                        raw_bid = getattr(dip, 'vacuum_bid', 0.0)
+                        try:
+                            raw_bid = float(getattr(dip, 'vacuum_bid', 0.0) or 0.0)
+                        except (TypeError, ValueError):
+                            raw_bid = 0.0
                         if raw_bid <= 0:
                             continue
                         
