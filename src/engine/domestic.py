@@ -237,23 +237,27 @@ class DomesticMixin:
             if repayment > 0.1:
                 self.sys_logs_this_turn.append(f"[{country.name} 債務返済] 未執行予算にて {repayment:.1f} を返済 (政府貯蓄: {S_gov:.1f})")
 
+        # ===== 四半期スケールSNAモデル (Y_q = C_q + I_q + G_q + NX_q) =====
+        # 全フロー変数を四半期ベースで統一することで、政府支出G（四半期予算）とのスケール整合を保証
+
         # 基礎貯蓄率 (政治体制と福祉投資による低下)
         base_s_rate = AUTHORITARIAN_BASE_SAVING_RATE if country.government_type == GovernmentType.AUTHORITARIAN else DEMOCRACY_BASE_SAVING_RATE
         saving_rate = max(0.15, base_s_rate - (inv_wel * 0.15))
 
-        tax_revenue = old_gdp * country.tax_rate
+        quarterly_gdp = old_gdp / TURNS_PER_YEAR
+        tax_revenue_q = old_gdp * country.tax_rate / TURNS_PER_YEAR  # 四半期税収
 
-        # 1. 民間消費 (C)
-        # ケインズ型消費関数: C = (Y - T) * (1 - s)
+        # 1. 民間消費 (C_q)
+        # ケインズ型消費関数: C = (Y_q - T_q) * (1 - s)
         # 増税すると即座に消費が減る。減税すると消費が大きく活性化するボーナスを追加。
-        C = max(0.0, (old_gdp - tax_revenue) * (1.0 - saving_rate))
+        C = max(0.0, (quarterly_gdp - tax_revenue_q) * (1.0 - saving_rate))
         if tax_diff < 0:
             consumption_bonus_multiplier = 1.0 + (abs(tax_diff) * 2.0)
             C *= consumption_bonus_multiplier
             
-        S_private = max(0.0, (old_gdp - tax_revenue) - C)
+        S_private = max(0.0, (quarterly_gdp - tax_revenue_q) - C)
 
-        # --- SNAマクロ経済モデル: 民間投資 (I) ---
+        # --- SNAマクロ経済モデル: 民間投資 (I_q) ---
         # [Harrod 1939; Domar 1946] 貯蓄=投資均衡仮定の下、民間貯蓄の一部が
         # 資本市場を通じて国内投資へ還流すると仮定。係数0.95は国内投資率を表し、
         # 残5%は海外流出・現預金積み上げ等として処理。
@@ -261,7 +265,7 @@ class DomesticMixin:
         # 政府の経済投資は民間投資を誘発（クラウドイン）し、軍事費が民間投資を押し出す（クラウドアウト）。
         # 民間貯蓄に加え、政府の未執行予算(S_gov)が金融市場を通じて民間投資に還流する
         induced_investment = S_private * 0.95 + (S_gov * DEBT_REPAYMENT_CROWD_IN_MULTIPLIER) + (g_econ * GOVERNMENT_CROWD_IN_MULTIPLIER) - (g_mil * GOVERNMENT_CROWD_OUT_MULTIPLIER)
-        base_investment = old_gdp * BASE_INVESTMENT_RATE
+        base_investment = quarterly_gdp * BASE_INVESTMENT_RATE
         I = max(0.0, max(base_investment, induced_investment))
         
         # -- 災害・技術革新のフロー影響を適用 --
@@ -294,19 +298,22 @@ class DomesticMixin:
         else:
             h_ratio_capped = max(0.5, base_h_ratio)
 
-        # マクロ需要ベースライン (C+I+G 全体に強力なキャップをかけた教育バフを乗ずる)
-        base_aggregated_demand = (C + I + G) * h_ratio_capped
+        # マクロ需要ベースライン (C_q+I_q+G_q 全体に強力なキャップをかけた教育バフを乗ずる)
+        base_aggregated_demand_q = (C + I + G) * h_ratio_capped
 
         # --- 内生的成長理論 (Romer model) によるイノベーション効果 ---
-        # そのターンの教育・科学投資(g_edu)がGDPに対して占める割合が、技術進歩（基礎成長率）を押し上げる
-        edu_investment_ratio = g_edu / max(1.0, old_gdp)
+        # そのターンの教育・科学投資(g_edu)が四半期GDPに対して占める割合が、技術進歩（基礎成長率）を押し上げる
+        edu_investment_ratio = g_edu / max(1.0, quarterly_gdp)
         
         # 成長率バフへの変換式。対数を用いて異常な投資への耐性を持たせる
         # 例: 投資率0.05(5%)投入 -> log1p(0.5)*0.05 = 約2.0%の追加成長
         endogenous_growth_bonus = math.log1p(edu_investment_ratio * 10.0) * ENDOGENOUS_GROWTH_ALPHA
 
-        # 総需要に内生的な技術進歩を掛け合わせ、純輸出を足して新GDPを算出
-        new_gdp_provisional = base_aggregated_demand * (1.0 + endogenous_growth_bonus) + country.last_turn_nx
+        # 四半期の総需要に内生的な技術進歩を掛け合わせ、純輸出を足して四半期GDPを算出
+        new_quarterly_gdp = base_aggregated_demand_q * (1.0 + endogenous_growth_bonus) + country.last_turn_nx
+        
+        # 四半期GDPを年間GDPに変換して country.economy に格納
+        new_gdp_provisional = new_quarterly_gdp * TURNS_PER_YEAR
         
         # 災害ダメージは当期の経済から直接引く（巨大な資本破壊）
         if disaster_damage_sum > 0:
