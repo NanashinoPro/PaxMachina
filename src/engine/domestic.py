@@ -276,7 +276,19 @@ class DomesticMixin:
         # ベース投資(BASE_INVESTMENT_RATE)を生命線として底板に設定する。
         # 政府の経済投資は民間投資を誘発（クラウドイン）し、軍事費が民間投資を押し出す（クラウドアウト）。
         # 民間貯蓄に加え、政府の未執行予算(S_gov)が金融市場を通じて民間投資に還流する
-        induced_investment = S_private * 0.95 + (S_gov * DEBT_REPAYMENT_CROWD_IN_MULTIPLIER) + (g_econ * GOVERNMENT_CROWD_IN_MULTIPLIER) - (g_mil * GOVERNMENT_CROWD_OUT_MULTIPLIER)
+        
+        # --- 利払いリーケージ修正 ---
+        # 税収のうち利払いに使われた分は、債権者（国内銀行・年金基金・個人投資家）への
+        # 所得移転であり、その一定割合（INTEREST_REINVESTMENT_RATE=70%）が
+        # 資本市場を通じて国内民間投資に再投資される [Mankiw "Macroeconomics" Ch.3]
+        interest_leakage = max(0.0, tax_revenue_q - budget)
+        interest_reinvested = interest_leakage * INTEREST_REINVESTMENT_RATE
+        
+        induced_investment = (S_private * 0.95 
+                              + interest_reinvested
+                              + (S_gov * DEBT_REPAYMENT_CROWD_IN_MULTIPLIER) 
+                              + (g_econ * GOVERNMENT_CROWD_IN_MULTIPLIER) 
+                              - (g_mil * GOVERNMENT_CROWD_OUT_MULTIPLIER))
         base_investment = quarterly_gdp * BASE_INVESTMENT_RATE
         I = max(0.0, max(base_investment, induced_investment))
         
@@ -336,7 +348,8 @@ class DomesticMixin:
             f"  C_q:{C:.1f} ({C/quarterly_gdp*100:.1f}%GDP) | "
             f"I_q:{I:.1f} ({I/quarterly_gdp*100:.1f}%GDP) [base:{base_investment:.1f}, induced:{induced_investment:.1f}] | "
             f"G_q:{G:.1f} ({G/quarterly_gdp*100:.1f}%GDP)\n"
-            f"  NX:{country.last_turn_nx:+.1f} | HCI乗数:{h_ratio_capped:.3f} | "
+            f"  利払い漏出:{interest_leakage:.1f} → 還流(70%):{interest_reinvested:.1f} | "
+            f"NX:{country.last_turn_nx:+.1f} | HCI乗数:{h_ratio_capped:.3f} | "
             f"内生成長:{endogenous_growth_bonus:.4f} | "
             f"C+I+G(q):{C+I+G:.1f} → 需要_q:{base_aggregated_demand_q:.1f} → 新Q:{new_quarterly_gdp:.1f}\n"
             f"  投資配分: 経済{inv_econ:.0%} 軍事{inv_mil:.0%} 福祉{inv_wel:.0%} 教育{inv_edu:.0%} 諜報{inv_intel:.0%} | "
