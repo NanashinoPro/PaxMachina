@@ -352,8 +352,14 @@ quarterly_gdp = GDP / TURNS_PER_YEAR
 tax_q = GDP × 税率 / TURNS_PER_YEAR
 
 C_q = (quarterly_gdp - tax_q) × (1 - 貯蓄率)     # ケインズ型消費関数（四半期）
-I_q = 民間貯蓄_q × 0.95 + 政府経済投資 × クラウドイン - 軍事投資 × クラウドアウト
-G_q = 政府支出合計（予算 × 投資配分 × 政策実行力）  # 予算は四半期ベース
+
+# 利払いリーケージ修正: 税収から利払いに使われた分は債権者への所得移転
+# その70%が国内民間投資に再投資される [Mankiw "Macroeconomics" Ch.3]
+interest_leakage = max(0, tax_q - budget)
+interest_reinvested = interest_leakage × 0.70  # INTEREST_REINVESTMENT_RATE
+
+I_q = 民間貯蓄_q × 0.95 + interest_reinvested + 政府経済投資 × クラウドイン - 軍事投資 × クラウドアウト
+G_q = 政府支出合計（予算 × 投資配分 × 政策実行力）  # 予算は四半期ベース（利払い後）
 NX_q = 純輸出（重力モデルで計算、当ターンフロー）
 
 新GDP = (C_q + I_q + G_q) × HCI乗数 × (1 + 内生的成長) × TURNS_PER_YEAR + NX_q × TURNS_PER_YEAR
