@@ -318,15 +318,11 @@ class WorldEngine(
             # 毎ターン、政権の存続期間をインクリメント
             country.regime_duration += 1
             
-            # 【新機能】財政規律ペナルティ
-            # 国債残高がGDPに対して大きすぎる場合、信認低下により経済成長にマイナスデバフをかける
-            debt_ratio = country.national_debt / max(1.0, country.economy)
-            if debt_ratio > 0.0:
-                # 負債比率1.0で約-1.0%の成長阻害。借金依存度が高いほど悪化する非線形ペナルティ
-                debt_penalty = min(5.0, (math.exp(debt_ratio * 1.5) - 1.0) * 0.5) 
-                if debt_penalty > 0.1:
-                    country.economy *= (1.0 - (debt_penalty / 100.0))
-                    self.sys_logs_this_turn.append(f"[{c_name} 財政ペナルティ] 累積国債がGDP比{debt_ratio:.1%}に達したため、信用収縮により経済に-{debt_penalty:.2f}%のデバフが発生しました。")
+            # 【廃止】財政規律ペナルティ
+            # domestic.py の利払いモデル（interest_leakage）で既に表現済み。
+            # ここでさらにGDPを直接削ると二重計上となるため削除。
+            # (v1-3.2: Álvarez-Pereira et al. 2022, Mankiw Ch.3 に準拠した整理)
+            
             
             snapshot = {
                 "turn": self.state.turn,

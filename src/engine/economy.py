@@ -4,7 +4,10 @@ from models import RelationType
 from .constants import (
     GRAVITY_TARIFF_ELASTICITY, GRAVITY_ALLIANCE_DISTANCE_FACTOR,
     GRAVITY_SANCTION_DISTANCE_FACTOR, GRAVITY_TRADE_SCALE,
-    DEFAULT_TARIFF_RATE
+    DEFAULT_TARIFF_RATE,
+    SANCTION_TARGET_DAMAGE_PER_CASE, SANCTION_TARGET_MAX_PER_CASE,
+    SANCTION_TARGET_MAX_CUMULATIVE,
+    SANCTION_SENDER_COST_PER_CASE, SANCTION_SENDER_MAX_COST
 )
 
 
@@ -162,27 +165,55 @@ class EconomyMixin:
                 # 単年度黒字ならカウンターを減少（またはリセット）
                 country.trade_deficit_counter = max(0, country.trade_deficit_counter - 1)
             
-        # Sanctions (Damage Model)
+        # Sanctions (Damage Model) — 非貿易チャネルの残余ダメージ
+        # [学術的根拠] Neuenkirch & Neumeier (2015), Gutmann et al. (2021)
+        # 貿易チャネル（NX）は重力モデル(GRAVITY_SANCTION_DISTANCE_FACTOR=10.0)で処理済み。
+        # ここでは投資萎縮・金融遮断・管理コスト等の非貿易チャネル分を適用する。
+        # 複数制裁の累積をキャップすることで、学術的上限（年-8%）を超えないよう制御。
+
+        # Phase 1: 各国が受ける制裁ダメージを加算方式で集計
+        sanction_damage_accumulator = {}   # {target_name: total_damage_percent}
+        sanction_sender_count = {}         # {imposer_name: count}
+
         for sanction in self.state.active_sanctions:
             if sanction.imposer not in self.state.countries or sanction.target not in self.state.countries:
                 continue
             imposer = self.state.countries[sanction.imposer]
             target = self.state.countries[sanction.target]
-            
-            # 制裁ダメージ: max 10%デバフ。2.0 * (imposer / target)
+
+            # 制裁1件あたりのダメージ: GDP比率に応じて算出、上限SANCTION_TARGET_MAX_PER_CASE
             ratio = imposer.economy / max(1.0, target.economy)
-            damage_percent = min(10.0, 2.0 * ratio)
-            
-            target.economy *= (1.0 - damage_percent / 100.0)
-            imposer.economy *= 0.99 # 発動国も1%の経済遅滞ダメージを受ける
-            
+            damage_percent = min(SANCTION_TARGET_MAX_PER_CASE, SANCTION_TARGET_DAMAGE_PER_CASE * ratio)
+
+            sanction_damage_accumulator.setdefault(sanction.target, 0.0)
+            sanction_damage_accumulator[sanction.target] += damage_percent
+
+            sanction_sender_count.setdefault(sanction.imposer, 0)
+            sanction_sender_count[sanction.imposer] += 1
+
             # 制裁による支持率ペナルティ（ARCHITECTURE.md §2.3 準拠）
-            target_approval_penalty = min(5.0, 1.0 * ratio)  # 対象国: GDP比率に応じて最大5%低下
-            imposer_approval_penalty = 0.5  # 発動国: 常に0.5%低下
+            target_approval_penalty = min(5.0, 1.0 * ratio)
+            imposer_approval_penalty = 0.5
             target.approval_rating = max(0.0, target.approval_rating - target_approval_penalty)
             imposer.approval_rating = max(0.0, imposer.approval_rating - imposer_approval_penalty)
+
             self.sys_logs_this_turn.append(
                 f"[制裁ダメージ] {sanction.imposer} -> {sanction.target} | "
-                f"経済デバフ: -{damage_percent:.1f}% (発動国: -1.0%) | "
+                f"個別デバフ: -{damage_percent:.2f}% | "
                 f"支持率ペナルティ: 対象国 -{target_approval_penalty:.1f}%, 発動国 -{imposer_approval_penalty:.1f}%"
             )
+
+        # Phase 2: 累積キャップを適用しGDPを一括調整
+        for target_name, raw_damage in sanction_damage_accumulator.items():
+            capped_damage = min(SANCTION_TARGET_MAX_CUMULATIVE, raw_damage)
+            self.state.countries[target_name].economy *= (1.0 - capped_damage / 100.0)
+            if raw_damage > SANCTION_TARGET_MAX_CUMULATIVE:
+                self.sys_logs_this_turn.append(
+                    f"[制裁キャップ] {target_name}: 累積制裁 -{raw_damage:.1f}% → キャップ -{capped_damage:.1f}% に制限"
+                )
+
+        # 発動国コスト: サプライチェーン断絶・管理コスト等（非貿易チャネル残余）
+        for imposer_name, count in sanction_sender_count.items():
+            total_cost = min(SANCTION_SENDER_MAX_COST, SANCTION_SENDER_COST_PER_CASE * count)
+            self.state.countries[imposer_name].economy *= (1.0 - total_cost)
+

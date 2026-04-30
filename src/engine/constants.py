@@ -56,6 +56,22 @@ GRAVITY_SANCTION_DISTANCE_FACTOR = 10.0   # 制裁時の実効距離係数（距
 GRAVITY_TRADE_SCALE = 50.0                # 貿易量スケール係数（現実の貿易/GDP比≈3-5%に合わせて逆算）
 DEFAULT_TARIFF_RATE = 0.05                # デフォルト関税率（5%、貿易協定なしの場合）
 
+# 制裁ダメージモデル定数（非貿易チャネル: 投資萎縮・金融遮断・管理コスト）
+# [学術的根拠]
+#   - Neuenkirch & Neumeier (2015, European J. Political Economy):
+#     UN制裁: GDP/C -2.3〜-3.5%pt/年、包括的エンバーゴ: -5%pt/年超
+#   - Gutmann, Neuenkirch & Neumeier (2021, J. Comparative Economics):
+#     制裁効果は最初の2年に集中。C/I/G/NX全構成要素に影響
+#   - Hufbauer, Schott & Elliott (2007, "Economic Sanctions Reconsidered" 3rd Ed.):
+#     発動国コスト: 平均約-0.4%/年
+#   ※ 貿易チャネル（NXへの影響）は重力モデル(GRAVITY_SANCTION_DISTANCE_FACTOR)で
+#     処理済み。ここでは重力モデルで捕捉できない残余チャネルのみを適用する。
+SANCTION_TARGET_DAMAGE_PER_CASE = 0.5     # 制裁1件あたりの対象国ダメージ係数（GDP比率に乗算）
+SANCTION_TARGET_MAX_PER_CASE = 1.5        # 制裁1件あたり最大1.5%/ターン（年-6%。包括的エンバーゴ級）
+SANCTION_TARGET_MAX_CUMULATIVE = 2.0      # 1ターンの累積制裁ダメージ上限2.0%（年-8%相当）
+SANCTION_SENDER_COST_PER_CASE = 0.001     # 発動国コスト: 1件あたり0.1%/ターン（年-0.4%相当）
+SANCTION_SENDER_MAX_COST = 0.005          # 発動国コスト上限: 0.5%/ターン（年-2%相当）
+
 # 戦争モデルの定数
 DEFENDER_ADVANTAGE_MULTIPLIER = 1.2
 
